@@ -1127,6 +1127,18 @@ type RPCTransaction struct {
 	YParity             *hexutil.Uint64   `json:"yParity,omitempty"`
 }
 
+func NewRPCTransaction(tx *types.Transaction, header *types.Header, index uint64, config *params.ChainConfig) RPCTransaction {
+	return *newRPCTransaction(
+		tx,
+		header.Hash(),
+		header.Number.Uint64(),
+		header.Time,
+		index,
+		header.BaseFee,
+		config,
+	)
+}
+
 // newRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
 func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber uint64, blockTime uint64, index uint64, baseFee *big.Int, config *params.ChainConfig) *RPCTransaction {

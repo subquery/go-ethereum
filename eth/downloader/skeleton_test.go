@@ -31,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 // hookedBackfiller is a tester backfiller with all interface methods mocked and
@@ -832,7 +833,7 @@ func TestSkeletonSyncRetrievals(t *testing.T) {
 		// Create a fresh database and initialize it with the starting state
 		db := rawdb.NewMemoryDatabase()
 
-		rawdb.WriteBlock(db, types.NewBlockWithHeader(chain[0]))
+		rawdb.WriteBlock(db, types.NewBlockWithHeader(chain[0]), params.TestChainConfig)
 		rawdb.WriteReceipts(db, chain[0].Hash(), chain[0].Number.Uint64(), types.Receipts{})
 
 		// Create a peer set to feed headers through
@@ -862,7 +863,7 @@ func TestSkeletonSyncRetrievals(t *testing.T) {
 					for progress.Subchains[0].Tail < progress.Subchains[0].Head {
 						header := rawdb.ReadSkeletonHeader(db, progress.Subchains[0].Tail)
 
-						rawdb.WriteBlock(db, types.NewBlockWithHeader(header))
+						rawdb.WriteBlock(db, types.NewBlockWithHeader(header), params.TestChainConfig)
 						rawdb.WriteReceipts(db, header.Hash(), header.Number.Uint64(), types.Receipts{})
 
 						rawdb.DeleteSkeletonHeader(db, header.Number.Uint64())
@@ -872,7 +873,7 @@ func TestSkeletonSyncRetrievals(t *testing.T) {
 					}
 					filled = rawdb.ReadSkeletonHeader(db, progress.Subchains[0].Tail)
 
-					rawdb.WriteBlock(db, types.NewBlockWithHeader(filled))
+					rawdb.WriteBlock(db, types.NewBlockWithHeader(filled), params.TestChainConfig)
 					rawdb.WriteReceipts(db, filled.Hash(), filled.Number.Uint64(), types.Receipts{})
 				},
 
