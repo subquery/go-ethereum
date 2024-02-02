@@ -611,14 +611,21 @@ func (b testBackend) Engine() consensus.Engine         { return b.chain.Engine()
 func (b testBackend) GetLogs(ctx context.Context, blockHash common.Hash, number uint64) ([][]*types.Log, error) {
 	panic("implement me")
 }
+func (b testBackend) GetTxBloom(ctx context.Context, hash common.Hash) types.Bloom {
+	panic("implement me")
+}
 func (b testBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
 	panic("implement me")
 }
 func (b testBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
 	panic("implement me")
 }
-func (b testBackend) BloomStatus() (uint64, uint64) { panic("implement me") }
+func (b testBackend) BloomStatus() (uint64, uint64)   { panic("implement me") }
+func (b testBackend) TxBloomStatus() (uint64, uint64) { panic("implement me") }
 func (b testBackend) ServiceFilter(ctx context.Context, session *bloombits.MatcherSession) {
+	panic("implement me")
+}
+func (b testBackend) TxServiceFilter(ctx context.Context, session *bloombits.MatcherSession) {
 	panic("implement me")
 }
 
