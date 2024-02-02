@@ -61,6 +61,7 @@ type Backend interface {
 	GetBody(ctx context.Context, hash common.Hash, number rpc.BlockNumber) (*types.Body, error)
 	GetReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, error)
 	GetLogs(ctx context.Context, blockHash common.Hash, number uint64) ([][]*types.Log, error)
+	GetTxBloom(ctx context.Context, hash common.Hash) types.Bloom
 
 	CurrentHeader() *types.Header
 	ChainConfig() *params.ChainConfig
@@ -71,6 +72,9 @@ type Backend interface {
 
 	BloomStatus() (uint64, uint64)
 	ServiceFilter(ctx context.Context, session *bloombits.MatcherSession)
+
+	TxBloomStatus() (uint64, uint64)
+	TxServiceFilter(ctx context.Context, session *bloombits.MatcherSession)
 }
 
 // FilterSystem holds resources shared by all filters.

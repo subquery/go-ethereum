@@ -456,24 +456,25 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		logged = time.Now()
 
 		// Key-value store statistics
-		headers         stat
-		bodies          stat
-		receipts        stat
-		tds             stat
-		numHashPairings stat
-		hashNumPairings stat
-		legacyTries     stat
-		stateLookups    stat
-		accountTries    stat
-		storageTries    stat
-		codes           stat
-		txLookups       stat
-		accountSnaps    stat
-		storageSnaps    stat
-		preimages       stat
-		bloomBits       stat
-		beaconHeaders   stat
-		cliqueSnaps     stat
+		headers              stat
+		bodies               stat
+		receipts             stat
+		tds                  stat
+		numHashPairings      stat
+		hashNumPairings      stat
+		legacyTries          stat
+		stateLookups         stat
+		accountTries         stat
+		storageTries         stat
+		codes                stat
+		txLookups            stat
+		accountSnaps         stat
+		storageSnaps         stat
+		preimages            stat
+		bloomBits            stat
+		bloomBitsTransaction stat
+		beaconHeaders        stat
+		cliqueSnaps          stat
 
 		// Verkle statistics
 		verkleTries        stat
@@ -534,6 +535,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			metadata.Add(size)
 		case bytes.HasPrefix(key, bloomBitsPrefix) && len(key) == (len(bloomBitsPrefix)+10+common.HashLength):
 			bloomBits.Add(size)
+		case bytes.HasPrefix(key, bloomBitsTransactionPrefix) && len(key) == (len(bloomBitsTransactionPrefix)+10+common.HashLength):
+			bloomBitsTransaction.Add(size)
 		case bytes.HasPrefix(key, BloomBitsIndexPrefix):
 			bloomBits.Add(size)
 		case bytes.HasPrefix(key, skeletonHeaderPrefix) && len(key) == (len(skeletonHeaderPrefix)+8):
@@ -601,6 +604,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		{"Key-Value store", "Block hash->number", hashNumPairings.Size(), hashNumPairings.Count()},
 		{"Key-Value store", "Transaction index", txLookups.Size(), txLookups.Count()},
 		{"Key-Value store", "Bloombit index", bloomBits.Size(), bloomBits.Count()},
+		{"Key-Value store", "Bloombit transaction index", bloomBitsTransaction.Size(), bloomBitsTransaction.Count()},
 		{"Key-Value store", "Contract codes", codes.Size(), codes.Count()},
 		{"Key-Value store", "Hash trie nodes", legacyTries.Size(), legacyTries.Count()},
 		{"Key-Value store", "Path trie state lookups", stateLookups.Size(), stateLookups.Count()},

@@ -179,3 +179,38 @@ func DeleteBloombits(db ethdb.Database, bit uint, from uint64, to uint64) {
 		log.Crit("Failed to delete bloom bits", "err", it.Error())
 	}
 }
+
+// ReadTransactionBloomBits retrieves the compressed bloom bit vector belonging to the given
+// section and bit index from the.
+func ReadTransactionBloomBits(db ethdb.KeyValueReader, bit uint, section uint64, head common.Hash) ([]byte, error) {
+	return db.Get(bloomBitsTransactionKey(bit, section, head))
+}
+
+// WriteTransactionBloomBits stores the compressed bloom bits vector belonging to the given
+// section and bit index.
+func WriteTransactionBloomBits(db ethdb.KeyValueWriter, bit uint, section uint64, head common.Hash, bits []byte) {
+	if err := db.Put(bloomBitsTransactionKey(bit, section, head), bits); err != nil {
+		log.Crit("Failed to store bloom bits", "err", err)
+	}
+}
+
+// DeleteTransactionBloomBits removes all compressed bloom bits vector belonging to the
+// given section range and bit index.
+func DeleteTransactionBloomBits(db ethdb.Database, bit uint, from uint64, to uint64) {
+	start, end := bloomBitsTransactionKey(bit, from, common.Hash{}), bloomBitsTransactionKey(bit, to, common.Hash{})
+	it := db.NewIterator(nil, start)
+	defer it.Release()
+
+	for it.Next() {
+		if bytes.Compare(it.Key(), end) >= 0 {
+			break
+		}
+		if len(it.Key()) != len(bloomBitsTransactionPrefix)+2+8+32 {
+			continue
+		}
+		db.Delete(it.Key())
+	}
+	if it.Error() != nil {
+		log.Crit("Failed to delete bloom bits", "err", it.Error())
+	}
+}

@@ -35,6 +35,7 @@ import (
 
 var (
 	errInvalidTopic           = errors.New("invalid topic(s)")
+	errInvalidSigHash         = errors.New("invalid sigHash(s)")
 	errFilterNotFound         = errors.New("filter not found")
 	errInvalidBlockRange      = errors.New("invalid block range params")
 	errPendingLogsUnsupported = errors.New("pending logs are not supported")
@@ -288,6 +289,7 @@ func (api *FilterAPI) Logs(ctx context.Context, crit FilterCriteria) (*rpc.Subsc
 // FilterCriteria represents a request to create a new filter.
 // Same as ethereum.FilterQuery but with UnmarshalJSON() method.
 type FilterCriteria ethereum.FilterQuery
+type TxFilterCriteria ethereum.TxFilterQuery
 
 // NewFilter creates a new filter and returns the filter id. It can be
 // used to retrieve logs when the state changes. This method cannot be
@@ -363,6 +365,36 @@ func (api *FilterAPI) GetLogs(ctx context.Context, crit FilterCriteria) ([]*type
 		return nil, err
 	}
 	return returnLogs(logs), err
+}
+
+func (api *FilterAPI) GetTransactions(ctx context.Context, crit TxFilterCriteria) ([]*ethapi.RPCTransaction, error) {
+
+	var filter *TxFilter
+	if crit.BlockHash != nil {
+		// Block filter requested, construct a single-shot filter
+		filter = api.sys.NewTxBlockFilter(*crit.BlockHash, crit.FromAddresses, crit.ToAddresses, crit.SigHashes)
+	} else {
+		// Convert the RPC block numbers into internal representations
+		begin := rpc.LatestBlockNumber.Int64()
+		if crit.FromBlock != nil {
+			begin = crit.FromBlock.Int64()
+		}
+		end := rpc.LatestBlockNumber.Int64()
+		if crit.ToBlock != nil {
+			end = crit.ToBlock.Int64()
+		}
+		if begin > 0 && end > 0 && begin > end {
+			return nil, errInvalidBlockRange
+		}
+		// Construct the range filter
+		filter = api.sys.NewTxRangeFilter(begin, end, 0, crit.FromAddresses, crit.ToAddresses, crit.SigHashes)
+	}
+	// Run the filter and return all the logs
+	txs, err := filter.Transactions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return returnTransactions(txs), err
 }
 
 // UninstallFilter removes the filter with the given filter id.
@@ -485,6 +517,15 @@ func returnLogs(logs []*types.Log) []*types.Log {
 	return logs
 }
 
+// returnTransactions is a helper that will return an empty log array in case the given logs array is nil,
+// otherwise the given logs array is returned.
+func returnTransactions(txs []*ethapi.RPCTransaction) []*ethapi.RPCTransaction {
+	if txs == nil {
+		return []*ethapi.RPCTransaction{}
+	}
+	return txs
+}
+
 // UnmarshalJSON sets *args fields with given data.
 func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 	type input struct {
@@ -516,79 +557,76 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 		}
 	}
 
-	args.Addresses = []common.Address{}
-
-	if raw.Addresses != nil {
-		// raw.Address can contain a single address or an array of addresses
-		switch rawAddr := raw.Addresses.(type) {
-		case []interface{}:
-			for i, addr := range rawAddr {
-				if strAddr, ok := addr.(string); ok {
-					addr, err := decodeAddress(strAddr)
-					if err != nil {
-						return fmt.Errorf("invalid address at index %d: %v", i, err)
-					}
-					args.Addresses = append(args.Addresses, addr)
-				} else {
-					return fmt.Errorf("non-string address at index %d", i)
-				}
-			}
-		case string:
-			addr, err := decodeAddress(rawAddr)
-			if err != nil {
-				return fmt.Errorf("invalid address: %v", err)
-			}
-			args.Addresses = []common.Address{addr}
-		default:
-			return errors.New("invalid addresses in query")
-		}
+	addresses, err := decodeAddresses(raw.Addresses)
+	if err != nil {
+		return err
 	}
+	args.Addresses = addresses
+
 	if len(raw.Topics) > maxTopics {
 		return errExceedMaxTopics
 	}
 
-	// topics is an array consisting of strings and/or arrays of strings.
-	// JSON null values are converted to common.Hash{} and ignored by the filter manager.
-	if len(raw.Topics) > 0 {
-		args.Topics = make([][]common.Hash, len(raw.Topics))
-		for i, t := range raw.Topics {
-			switch topic := t.(type) {
-			case nil:
-				// ignore topic when matching logs
+	topics, err := decodeTopics(raw.Topics)
+	if err != nil {
+		return err
+	}
+	args.Topics = topics
 
-			case string:
-				// match specific topic
-				top, err := decodeTopic(topic)
-				if err != nil {
-					return err
-				}
-				args.Topics[i] = []common.Hash{top}
+	return nil
+}
 
-			case []interface{}:
-				// or case e.g. [null, "topic0", "topic1"]
-				if len(topic) > maxSubTopics {
-					return errExceedMaxTopics
-				}
-				for _, rawTopic := range topic {
-					if rawTopic == nil {
-						// null component, match all
-						args.Topics[i] = nil
-						break
-					}
-					if topic, ok := rawTopic.(string); ok {
-						parsed, err := decodeTopic(topic)
-						if err != nil {
-							return err
-						}
-						args.Topics[i] = append(args.Topics[i], parsed)
-					} else {
-						return errInvalidTopic
-					}
-				}
-			default:
-				return errInvalidTopic
-			}
+func (args *TxFilterCriteria) UnmarshalJSON(data []byte) error {
+	type input struct {
+		BlockHash   *common.Hash     `json:"blockHash"`
+		FromBlock   *rpc.BlockNumber `json:"fromBlock"`
+		ToBlock     *rpc.BlockNumber `json:"toBlock"`
+		FromAddress interface{}      `json:"fromAddress"`
+		ToAddress   interface{}      `json:"toAddress"`
+		SigHashes   []interface{}    `json:"sigHashes"`
+	}
+
+	var raw input
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	if raw.BlockHash != nil {
+		if raw.FromBlock != nil || raw.ToBlock != nil {
+			// BlockHash is mutually exclusive with FromBlock/ToBlock criteria
+			return errors.New("cannot specify both BlockHash and FromBlock/ToBlock, choose one or the other")
 		}
+		args.BlockHash = raw.BlockHash
+	} else {
+		if raw.FromBlock != nil {
+			args.FromBlock = big.NewInt(raw.FromBlock.Int64())
+		}
+
+		if raw.ToBlock != nil {
+			args.ToBlock = big.NewInt(raw.ToBlock.Int64())
+		}
+	}
+
+	fromAddress, err := decodeAddresses(raw.FromAddress)
+	if err != nil {
+		return err
+	}
+	args.FromAddresses = fromAddress
+
+	toAddresses, err := decodeAddresses(raw.ToAddress)
+	if err != nil {
+		return err
+	}
+	args.ToAddresses = toAddresses
+
+	// data is an array consisting of strings.
+	// JSON null values are converted to common.Hash{} and ignored by the filter manager.
+	if len(raw.SigHashes) > 0 {
+		parsed, err := decodeSigHashes(raw.SigHashes)
+		if err != nil {
+			return err
+		}
+		args.SigHashes = parsed
 	}
 
 	return nil
@@ -608,4 +646,113 @@ func decodeTopic(s string) (common.Hash, error) {
 		err = fmt.Errorf("hex has invalid length %d after decoding; expected %d for topic", len(b), common.HashLength)
 	}
 	return common.BytesToHash(b), err
+}
+
+func decodeSigHash(s string) ([]byte, error) {
+	b, err := hexutil.Decode(s)
+	if err == nil && len(b) != 4 {
+		err = fmt.Errorf("hex has invalid length %d after decoding; expected %d for topic", len(b), 4)
+	}
+	return b, err
+}
+
+// decodeAddresses decodes an raw value which could contain a single address or an array of addresses into an array of addresses
+func decodeAddresses(input interface{}) ([]common.Address, error) {
+	addresses := []common.Address{}
+
+	if input != nil {
+		switch rawAddr := input.(type) {
+		case []interface{}:
+			for i, addr := range rawAddr {
+				if strAddr, ok := addr.(string); ok {
+					addr, err := decodeAddress(strAddr)
+					if err != nil {
+						return addresses, fmt.Errorf("invalid address at index %d: %v", i, err)
+					}
+					addresses = append(addresses, addr)
+				} else {
+					return addresses, fmt.Errorf("non-string address at index %d", i)
+				}
+			}
+		case string:
+			addr, err := decodeAddress(rawAddr)
+			if err != nil {
+				return addresses, fmt.Errorf("invalid address: %v", err)
+			}
+			addresses = []common.Address{addr}
+		default:
+			return addresses, errors.New("invalid from addresses in query")
+		}
+	}
+
+	return addresses, nil
+}
+
+// topics is an array consisting of strings and/or arrays of strings.
+// JSON null values are converted to common.Hash{} and ignored by the filter manager.
+func decodeTopics(input []interface{}) ([][]common.Hash, error) {
+	if input == nil || len(input) == 0 {
+		return nil, nil
+	}
+
+	result := make([][]common.Hash, len(input))
+
+	for i, t := range input {
+		switch topic := t.(type) {
+		case nil:
+			// ignore topic when matching logs
+
+		case string:
+			// match specific topic
+			top, err := decodeTopic(topic)
+			if err != nil {
+				return nil, err
+			}
+			result[i] = []common.Hash{top}
+
+		case []interface{}:
+			// or case e.g. [null, "topic0", "topic1"]
+			for _, rawTopic := range topic {
+				if rawTopic == nil {
+					// null component, match all
+					result[i] = nil
+					break
+				}
+				if topic, ok := rawTopic.(string); ok {
+					parsed, err := decodeTopic(topic)
+					if err != nil {
+						return nil, err
+					}
+					result[i] = append(result[i], parsed)
+				} else {
+					return nil, errInvalidTopic
+				}
+			}
+		default:
+			return nil, errInvalidTopic
+		}
+	}
+
+	return result, nil
+}
+
+func decodeSigHashes(input []interface{}) ([][]byte, error) {
+	output := [][]byte{}
+	for _, t := range input {
+		switch data := t.(type) {
+		case nil:
+			// ignore topic when matching logs
+
+		case string:
+			bytes, err := decodeSigHash(data)
+			if err != nil {
+				return nil, err
+			}
+			output = append(output, bytes)
+		default:
+			return nil, errInvalidSigHash
+		}
+	}
+
+	return output, nil
 }

@@ -86,7 +86,7 @@ func TestLookupStorage(t *testing.T) {
 			}
 			// Insert all the transactions into the database, and verify contents
 			WriteCanonicalHash(db, block.Hash(), block.NumberU64())
-			WriteBlock(db, block)
+			WriteBlock(db, block, params.TestChainConfig)
 			tc.writeTxLookupEntriesByBlock(db, block)
 
 			for i, tx := range txs {

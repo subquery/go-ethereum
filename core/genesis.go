@@ -510,7 +510,7 @@ func (g *Genesis) Commit(db ethdb.Database, triedb *triedb.Database) (*types.Blo
 	}
 	rawdb.WriteGenesisStateSpec(db, block.Hash(), blob)
 	rawdb.WriteTd(db, block.Hash(), block.NumberU64(), block.Difficulty())
-	rawdb.WriteBlock(db, block)
+	rawdb.WriteBlock(db, block, g.Config)
 	rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), nil)
 	rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
 	rawdb.WriteHeadBlockHash(db, block.Hash())

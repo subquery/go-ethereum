@@ -68,6 +68,7 @@ type Backend interface {
 	StateAndHeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*state.StateDB, *types.Header, error)
 	Pending() (*types.Block, types.Receipts, *state.StateDB)
 	GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error)
+	GetTxBloom(ctx context.Context, hash common.Hash) types.Bloom
 	GetEVM(ctx context.Context, msg *core.Message, state *state.StateDB, header *types.Header, vmConfig *vm.Config, blockCtx *vm.BlockContext) *vm.EVM
 	SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription
 	SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription
@@ -96,6 +97,8 @@ type Backend interface {
 	SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription
 	BloomStatus() (uint64, uint64)
 	ServiceFilter(ctx context.Context, session *bloombits.MatcherSession)
+	TxBloomStatus() (uint64, uint64)
+	TxServiceFilter(ctx context.Context, session *bloombits.MatcherSession)
 }
 
 func GetAPIs(apiBackend Backend) []rpc.API {

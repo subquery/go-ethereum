@@ -211,6 +211,9 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 	// Configure log filter RPC API.
 	filterSystem := utils.RegisterFilterAPI(stack, backend, &cfg.Eth)
 
+	// Configure Subql RPC API.
+	utils.RegisterSubqlAPI(stack, backend, filterSystem)
+
 	// Configure GraphQL if requested.
 	if ctx.IsSet(utils.GraphQLEnabledFlag.Name) {
 		utils.RegisterGraphQLService(stack, backend, filterSystem, &cfg.Node)
