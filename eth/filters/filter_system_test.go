@@ -125,6 +125,15 @@ func (b *testBackend) GetLogs(ctx context.Context, hash common.Hash, number uint
 	return logs, nil
 }
 
+func (b *testBackend) GetTxBloom(ctx context.Context, hash common.Hash) types.Bloom {
+	number := rawdb.ReadHeaderNumber(b.db, hash)
+	if number == nil {
+		return types.BytesToBloom(make([]byte, 6))
+	}
+	bytes := rawdb.ReadTxBloom(b.db, hash, *number)
+	return types.BytesToBloom(*bytes)
+}
+
 func (b *testBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return b.pendingBlock, b.pendingReceipts
 }
@@ -153,6 +162,10 @@ func (b *testBackend) BloomStatus() (uint64, uint64) {
 	return params.BloomBitsBlocks, b.sections
 }
 
+func (b *testBackend) TxBloomStatus() (uint64, uint64) {
+	return params.BloomBitsBlocks, b.sections
+}
+
 func (b *testBackend) ServiceFilter(ctx context.Context, session *bloombits.MatcherSession) {
 	requests := make(chan chan *bloombits.Retrieval)
 
@@ -172,6 +185,33 @@ func (b *testBackend) ServiceFilter(ctx context.Context, session *bloombits.Matc
 					if rand.Int()%4 != 0 { // Handle occasional missing deliveries
 						head := rawdb.ReadCanonicalHash(b.db, (section+1)*params.BloomBitsBlocks-1)
 						task.Bitsets[i], _ = rawdb.ReadBloomBits(b.db, task.Bit, section, head)
+					}
+				}
+				request <- task
+			}
+		}
+	}()
+}
+
+func (b *testBackend) TxServiceFilter(ctx context.Context, session *bloombits.MatcherSession) {
+	requests := make(chan chan *bloombits.Retrieval)
+
+	go session.Multiplex(16, 0, requests)
+	go func() {
+		for {
+			// Wait for a service request or a shutdown
+			select {
+			case <-ctx.Done():
+				return
+
+			case request := <-requests:
+				task := <-request
+
+				task.Bitsets = make([][]byte, len(task.Sections))
+				for i, section := range task.Sections {
+					if rand.Int()%4 != 0 { // Handle occasional missing deliveries
+						head := rawdb.ReadCanonicalHash(b.db, (section+1)*params.BloomBitsBlocks-1)
+						task.Bitsets[i], _ = rawdb.ReadTransactionBloomBits(b.db, task.Bit, section, head)
 					}
 				}
 				request <- task
@@ -843,7 +883,7 @@ func TestLightFilterLogs(t *testing.T) {
 		b.AddTx(tx)
 	})
 	for i, block := range blocks {
-		rawdb.WriteBlock(db, block)
+		rawdb.WriteBlock(db, block, params.TestChainConfig)
 		rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
 		rawdb.WriteHeadBlockHash(db, block.Hash())
 		if i > 0 {

@@ -89,7 +89,7 @@ func BenchmarkFilters(b *testing.B) {
 	gspec.MustCommit(db, triedb.NewDatabase(db, triedb.HashDefaults))
 
 	for i, block := range chain {
-		rawdb.WriteBlock(db, block)
+		rawdb.WriteBlock(db, block, params.TestChainConfig)
 		rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
 		rawdb.WriteHeadBlockHash(db, block.Hash())
 		rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), receipts[i])

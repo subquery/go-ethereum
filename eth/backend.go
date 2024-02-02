@@ -87,6 +87,9 @@ type Ethereum struct {
 	bloomIndexer      *core.ChainIndexer             // Bloom indexer operating during block imports
 	closeBloomHandler chan struct{}
 
+	bloomTransactionRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests for transactions
+	bloomTransactionsIndexer *core.ChainIndexer             // Bloom indexer operating during block imports for transactions bloom
+
 	APIBackend *EthAPIBackend
 
 	miner     *miner.Miner
@@ -157,20 +160,22 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		networkID = chainConfig.ChainID.Uint64()
 	}
 	eth := &Ethereum{
-		config:            config,
-		merger:            consensus.NewMerger(chainDb),
-		chainDb:           chainDb,
-		eventMux:          stack.EventMux(),
-		accountManager:    stack.AccountManager(),
-		engine:            engine,
-		closeBloomHandler: make(chan struct{}),
-		networkID:         networkID,
-		gasPrice:          config.Miner.GasPrice,
-		etherbase:         config.Miner.Etherbase,
-		bloomRequests:     make(chan chan *bloombits.Retrieval),
-		bloomIndexer:      core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
-		p2pServer:         stack.Server(),
-		shutdownTracker:   shutdowncheck.NewShutdownTracker(chainDb),
+		config:                   config,
+		merger:                   consensus.NewMerger(chainDb),
+		chainDb:                  chainDb,
+		eventMux:                 stack.EventMux(),
+		accountManager:           stack.AccountManager(),
+		engine:                   engine,
+		closeBloomHandler:        make(chan struct{}),
+		networkID:                networkID,
+		gasPrice:                 config.Miner.GasPrice,
+		etherbase:                config.Miner.Etherbase,
+		bloomRequests:            make(chan chan *bloombits.Retrieval),
+		bloomIndexer:             core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
+		bloomTransactionRequests: make(chan chan *bloombits.Retrieval),
+		bloomTransactionsIndexer: core.NewTransactionBloomIndexer(chainDb, chainConfig, params.BloomBitsBlocks, params.BloomConfirms),
+		p2pServer:                stack.Server(),
+		shutdownTracker:          shutdowncheck.NewShutdownTracker(chainDb),
 	}
 	bcVersion := rawdb.ReadDatabaseVersion(chainDb)
 	var dbVer = "<nil>"
@@ -218,6 +223,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 	eth.bloomIndexer.Start(eth.blockchain)
+	eth.bloomTransactionsIndexer.Start(eth.blockchain)
 
 	if config.BlobPool.Datadir != "" {
 		config.BlobPool.Datadir = stack.ResolvePath(config.BlobPool.Datadir)
@@ -474,19 +480,20 @@ func (s *Ethereum) StopMining() {
 func (s *Ethereum) IsMining() bool      { return s.miner.Mining() }
 func (s *Ethereum) Miner() *miner.Miner { return s.miner }
 
-func (s *Ethereum) AccountManager() *accounts.Manager  { return s.accountManager }
-func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
-func (s *Ethereum) TxPool() *txpool.TxPool             { return s.txPool }
-func (s *Ethereum) EventMux() *event.TypeMux           { return s.eventMux }
-func (s *Ethereum) Engine() consensus.Engine           { return s.engine }
-func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
-func (s *Ethereum) IsListening() bool                  { return true } // Always listening
-func (s *Ethereum) Downloader() *downloader.Downloader { return s.handler.downloader }
-func (s *Ethereum) Synced() bool                       { return s.handler.synced.Load() }
-func (s *Ethereum) SetSynced()                         { s.handler.enableSyncedFeatures() }
-func (s *Ethereum) ArchiveMode() bool                  { return s.config.NoPruning }
-func (s *Ethereum) BloomIndexer() *core.ChainIndexer   { return s.bloomIndexer }
-func (s *Ethereum) Merger() *consensus.Merger          { return s.merger }
+func (s *Ethereum) AccountManager() *accounts.Manager           { return s.accountManager }
+func (s *Ethereum) BlockChain() *core.BlockChain                { return s.blockchain }
+func (s *Ethereum) TxPool() *txpool.TxPool                      { return s.txPool }
+func (s *Ethereum) EventMux() *event.TypeMux                    { return s.eventMux }
+func (s *Ethereum) Engine() consensus.Engine                    { return s.engine }
+func (s *Ethereum) ChainDb() ethdb.Database                     { return s.chainDb }
+func (s *Ethereum) IsListening() bool                           { return true } // Always listening
+func (s *Ethereum) Downloader() *downloader.Downloader          { return s.handler.downloader }
+func (s *Ethereum) Synced() bool                                { return s.handler.synced.Load() }
+func (s *Ethereum) SetSynced()                                  { s.handler.enableSyncedFeatures() }
+func (s *Ethereum) ArchiveMode() bool                           { return s.config.NoPruning }
+func (s *Ethereum) BloomIndexer() *core.ChainIndexer            { return s.bloomIndexer }
+func (s *Ethereum) TransactionBloomIndexer() *core.ChainIndexer { return s.bloomTransactionsIndexer }
+func (s *Ethereum) Merger() *consensus.Merger                   { return s.merger }
 func (s *Ethereum) SyncMode() downloader.SyncMode {
 	mode, _ := s.handler.chainSync.modeAndLocalHead()
 	return mode
@@ -536,6 +543,7 @@ func (s *Ethereum) Stop() error {
 
 	// Then stop everything else.
 	s.bloomIndexer.Close()
+	s.bloomTransactionsIndexer.Close()
 	close(s.closeBloomHandler)
 	s.txPool.Close()
 	s.miner.Close()

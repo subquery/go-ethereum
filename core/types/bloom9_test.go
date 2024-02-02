@@ -153,3 +153,76 @@ func BenchmarkCreateBloom(b *testing.B) {
 		}
 	})
 }
+
+type testingSigner struct{}
+
+func (s testingSigner) Sender(tx *Transaction) (common.Address, error) {
+	return common.HexToAddress("0x1"), nil
+}
+
+func (signer testingSigner) SignatureValues(tx *Transaction, sig []byte) (r, s, v *big.Int, err error) {
+	return nil, nil, nil, fmt.Errorf("Not implemented")
+}
+
+func (s testingSigner) ChainID() *big.Int {
+	return big.NewInt(1)
+}
+
+func (s testingSigner) Hash(tx *Transaction) common.Hash {
+	return tx.Hash()
+}
+
+func (s testingSigner) Equal(Signer) bool {
+	return false
+}
+
+func BenchmarkCreateTransactionsBloom(b *testing.B) {
+	var rSmall = Transactions{
+		NewContractCreation(1, big.NewInt(1), 1, big.NewInt(1), nil),
+		NewTransaction(2, common.HexToAddress("0x2"), big.NewInt(2), 2, big.NewInt(2), nil),
+		NewTransaction(3, common.HexToAddress("0x2"), big.NewInt(0), 2, big.NewInt(2), common.Hex2Bytes("a9059cbb0000000000000000000000009b22a80d5c7b3374a05b446081f97d0a34079e7f00000000000000000000000000000000000000000000000000000000000003e8")),
+	}
+
+	signer := testingSigner{}
+
+	var rLarge = make(Transactions, 200)
+	for i := 0; i < 200; i += len(rSmall) {
+		copy(rLarge[i:], rSmall)
+	}
+
+	b.Run("small", func(b *testing.B) {
+		b.ReportAllocs()
+		var bl []byte
+		var err error
+		for i := 0; i < b.N; i++ {
+			bl, err = TransactionsBloom(rSmall, signer)
+			if err != nil {
+				b.Errorf("Failed to create transactions bloom %v", err)
+			}
+		}
+		b.StopTimer()
+		var exp = common.HexToHash("093733f7b5107cbd7df5d66c1bb9a99fc106e015b0029e2fc230ccaba81735b2")
+		got := crypto.Keccak256Hash(bl)
+		if got != exp {
+			b.Errorf("Got %x, exp %x", got, exp)
+		}
+	})
+
+	b.Run("big", func(b *testing.B) {
+		b.ReportAllocs()
+		var bl []byte
+		var err error
+		for i := 0; i < b.N; i++ {
+			bl, err = TransactionsBloom(rLarge, signer)
+			if err != nil {
+				b.Errorf("Failed to create transactions bloom %v", err)
+			}
+		}
+		b.StopTimer()
+		var exp = common.HexToHash("093733f7b5107cbd7df5d66c1bb9a99fc106e015b0029e2fc230ccaba81735b2")
+		got := crypto.Keccak256Hash(bl)
+		if got != exp {
+			b.Errorf("Got %x, exp %x", got, exp)
+		}
+	})
+}
