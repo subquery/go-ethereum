@@ -67,6 +67,22 @@ func (eth *Ethereum) startBloomHandlers(sectionSize uint64) {
 						}
 					}
 					request <- task
+				case request := <-eth.bloomTransactionRequests:
+					task := <-request
+					task.Bitsets = make([][]byte, len(task.Sections))
+					for i, section := range task.Sections {
+						head := rawdb.ReadCanonicalHash(eth.chainDb, (section+1)*sectionSize-1)
+						if compVector, err := rawdb.ReadTransactionBloomBits(eth.chainDb, task.Bit, section, head); err == nil {
+							if blob, err := bitutil.DecompressBytes(compVector, int(sectionSize/8)); err == nil {
+								task.Bitsets[i] = blob
+							} else {
+								task.Error = err
+							}
+						} else {
+							task.Error = err
+						}
+					}
+					request <- task
 				}
 			}
 		}()

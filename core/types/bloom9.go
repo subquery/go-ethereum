@@ -158,3 +158,29 @@ func bloomValues(data []byte, hashbuf []byte) (uint, byte, uint, byte, uint, byt
 func BloomLookup(bin Bloom, topic bytesBacked) bool {
 	return bin.Test(topic.Bytes())
 }
+
+// TransactionsBloom returns the bloom bytes for the given transactions
+func TransactionsBloom(transactions []*Transaction, signer Signer) ([]byte, error) {
+	buf := make([]byte, 6)
+	var bin Bloom
+	for _, transaction := range transactions {
+		// From field
+		sender, err := signer.Sender(transaction)
+		if err != nil {
+			return nil, err
+		}
+		bin.add(sender.Bytes(), buf)
+
+		// To field, this can be nil for contract creations
+		if transaction.To() != nil {
+			bin.add(transaction.To().Bytes(), buf)
+		}
+
+		// Function sig hash
+		if len(transaction.Data()) > 4 {
+			bin.add(transaction.Data()[:4], buf) // TODO test TX without data
+		}
+	}
+	return bin[:], nil
+}
+

@@ -1312,6 +1312,8 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, config *param
 func (s *BlockChainAPI) rpcMarshalHeader(ctx context.Context, header *types.Header) map[string]interface{} {
 	fields := RPCMarshalHeader(header)
 	fields["totalDifficulty"] = (*hexutil.Big)(s.b.GetTd(ctx, header.Hash()))
+	// TODO revert, just for testing purposes
+	fields["transactionsBloom"] = common.Bytes2Hex(s.b.GetTxBloom(ctx, header.Hash()).Bytes())
 	return fields
 }
 
@@ -1322,6 +1324,8 @@ func (s *BlockChainAPI) rpcMarshalBlock(ctx context.Context, b *types.Block, inc
 	if inclTx {
 		fields["totalDifficulty"] = (*hexutil.Big)(s.b.GetTd(ctx, b.Hash()))
 	}
+	// TODO revert, just for testing purposes
+	fields["transactionsBloom"] = common.Bytes2Hex(s.b.GetTxBloom(ctx, b.Hash()).Bytes())
 	return fields, nil
 }
 
@@ -1349,6 +1353,18 @@ type RPCTransaction struct {
 	R                   *hexutil.Big      `json:"r"`
 	S                   *hexutil.Big      `json:"s"`
 	YParity             *hexutil.Uint64   `json:"yParity,omitempty"`
+}
+
+func NewRPCTransaction(tx *types.Transaction, header *types.Header, index uint64, config *params.ChainConfig) RPCTransaction {
+	return *newRPCTransaction(
+		tx,
+		header.Hash(),
+		header.Number.Uint64(),
+		header.Time,
+		index,
+		header.BaseFee,
+		config,
+	)
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC

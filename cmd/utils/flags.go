@@ -1966,6 +1966,14 @@ func RegisterFilterAPI(stack *node.Node, backend ethapi.Backend, ethcfg *ethconf
 	return filterSystem
 }
 
+// ResiterSubqlAPI adds the subql specific RPC API to the node
+func RegisterSubqlAPI(stack *node.Node, backend ethapi.Backend, filterSystem *filters.FilterSystem) {
+	stack.RegisterAPIs([]rpc.API{{
+		Namespace: "subql",
+		Service:   filters.NewSubqlApi(filterSystem, backend),
+	}})
+}
+
 // RegisterFullSyncTester adds the full-sync tester service into node.
 func RegisterFullSyncTester(stack *node.Node, eth *eth.Ethereum, target common.Hash) {
 	catalyst.RegisterFullSyncTester(stack, eth, target)
