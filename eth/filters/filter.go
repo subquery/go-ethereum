@@ -202,6 +202,9 @@ func (f *Filter) Logs(ctx context.Context) ([]*types.Log, error) {
 				return logs, nil
 			}
 			logs = append(logs, log)
+			if checkLimit() {
+				return logs, nil
+			}
 		case err := <-errChan:
 			return logs, err
 		}
