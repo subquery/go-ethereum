@@ -85,6 +85,9 @@ type Ethereum struct {
 	bloomIndexer      *core.ChainIndexer             // Bloom indexer operating during block imports
 	closeBloomHandler chan struct{}
 
+	bloomTransactionRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests for transactions
+	bloomTransactionsIndexer *core.ChainIndexer             // Bloom indexer operating during block imports for transactions bloom
+
 	APIBackend *EthAPIBackend
 
 	miner    *miner.Miner
@@ -161,6 +164,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		gasPrice:          config.Miner.GasPrice,
 		bloomRequests:     make(chan chan *bloombits.Retrieval),
 		bloomIndexer:      core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
+		bloomTransactionRequests: make(chan chan *bloombits.Retrieval),
+		bloomTransactionsIndexer: core.NewTransactionBloomIndexer(chainDb, chainConfig, params.BloomBitsBlocks, params.BloomConfirms),
 		p2pServer:         stack.Server(),
 		discmix:           enode.NewFairMix(0),
 		shutdownTracker:   shutdowncheck.NewShutdownTracker(chainDb),
@@ -222,6 +227,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 	eth.bloomIndexer.Start(eth.blockchain)
+	eth.bloomTransactionsIndexer.Start(eth.blockchain)
 
 	if config.BlobPool.Datadir != "" {
 		config.BlobPool.Datadir = stack.ResolvePath(config.BlobPool.Datadir)
@@ -340,6 +346,7 @@ func (s *Ethereum) Synced() bool                       { return s.handler.synced
 func (s *Ethereum) SetSynced()                         { s.handler.enableSyncedFeatures() }
 func (s *Ethereum) ArchiveMode() bool                  { return s.config.NoPruning }
 func (s *Ethereum) BloomIndexer() *core.ChainIndexer   { return s.bloomIndexer }
+func (s *Ethereum) TransactionBloomIndexer() *core.ChainIndexer { return s.bloomTransactionsIndexer }
 
 // Protocols returns all the currently configured
 // network protocols to start.
@@ -408,6 +415,7 @@ func (s *Ethereum) Stop() error {
 
 	// Then stop everything else.
 	s.bloomIndexer.Close()
+	s.bloomTransactionsIndexer.Close()
 	close(s.closeBloomHandler)
 	s.txPool.Close()
 	s.blockchain.Stop()

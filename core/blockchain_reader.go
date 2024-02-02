@@ -440,3 +440,14 @@ func (bc *BlockChain) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscript
 func (bc *BlockChain) SubscribeBlockProcessingEvent(ch chan<- bool) event.Subscription {
 	return bc.scope.Track(bc.blockProcFeed.Subscribe(ch))
 }
+
+
+// GetTxBloom retrieves the Transactions Bloom for the given block
+// TODO this is a temporary function for development so there is no caching
+func (bc *BlockChain) GetTxBloom(hash common.Hash) *[]byte {
+	number := rawdb.ReadHeaderNumber(bc.db, hash)
+	if number == nil {
+		return nil
+	}
+	return rawdb.ReadTxBloom(bc.db, hash, *number)
+}

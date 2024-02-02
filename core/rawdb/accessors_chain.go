@@ -735,13 +735,14 @@ func ReadBlock(db ethdb.Reader, hash common.Hash, number uint64) *types.Block {
 }
 
 // WriteBlock serializes a block into the database, header and body separately.
-func WriteBlock(db ethdb.KeyValueWriter, block *types.Block) {
+func WriteBlock(db ethdb.KeyValueWriter, block *types.Block, config *params.ChainConfig) {
 	WriteBody(db, block.Hash(), block.NumberU64(), block.Body())
 	WriteHeader(db, block.Header())
+	WriteTxBloomByBlock(db, block, config)
 }
 
 // WriteAncientBlocks writes entire block data into ancient store and returns the total written size.
-func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts []types.Receipts, td *big.Int) (int64, error) {
+func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts []types.Receipts, td *big.Int, config *params.ChainConfig) (int64, error) {
 	var (
 		tdSum      = new(big.Int).Set(td)
 		stReceipts []*types.ReceiptForStorage
@@ -757,7 +758,12 @@ func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts 
 			if i > 0 {
 				tdSum.Add(tdSum, header.Difficulty)
 			}
-			if err := writeAncientBlock(op, block, header, stReceipts, tdSum); err != nil {
+
+			txBloom, err := types.TransactionsBloom(block.Transactions(), types.MakeSigner(config, block.Number(), block.Time()))
+			if err != nil {
+				return err
+			}
+			if err := writeAncientBlock(op, block, header, stReceipts, tdSum, &txBloom); err != nil {
 				return err
 			}
 		}
@@ -765,7 +771,7 @@ func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts 
 	})
 }
 
-func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *types.Header, receipts []*types.ReceiptForStorage, td *big.Int) error {
+func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *types.Header, receipts []*types.ReceiptForStorage, td *big.Int, txBloom *[]byte) error {
 	num := block.NumberU64()
 	if err := op.AppendRaw(ChainFreezerHashTable, num, block.Hash().Bytes()); err != nil {
 		return fmt.Errorf("can't add block %d hash: %v", num, err)
@@ -782,6 +788,9 @@ func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *type
 	if err := op.Append(ChainFreezerDifficultyTable, num, td); err != nil {
 		return fmt.Errorf("can't append block %d total difficulty: %v", num, err)
 	}
+	if err := op.Append(ChainFreezerTransactionBloomTable, num, txBloom); err != nil {
+		return fmt.Errorf("can't append block %d transactions bloom: %v", num, err)
+	}
 	return nil
 }
 
@@ -791,6 +800,7 @@ func DeleteBlock(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
 	DeleteHeader(db, hash, number)
 	DeleteBody(db, hash, number)
 	DeleteTd(db, hash, number)
+	DeleteTxBloom(db, hash, number)
 }
 
 // DeleteBlockWithoutNumber removes all block data associated with a hash, except
@@ -800,6 +810,7 @@ func DeleteBlockWithoutNumber(db ethdb.KeyValueWriter, hash common.Hash, number 
 	deleteHeaderWithoutNumber(db, hash, number)
 	DeleteBody(db, hash, number)
 	DeleteTd(db, hash, number)
+	DeleteTxBloom(db, hash, number)
 }
 
 const badBlockToKeep = 10
@@ -951,3 +962,74 @@ func ReadHeadBlock(db ethdb.Reader) *types.Block {
 	}
 	return ReadBlock(db, headBlockHash, *headBlockNumber)
 }
+
+
+// HasTxBloom verifies the existence of the transaction bloom belonging
+// to a block.
+func HasTxBloom(db ethdb.Reader, hash common.Hash, number uint64) bool {
+	if isCanon(db, number, hash) {
+		return true
+	}
+	if has, err := db.Has(blockTransactionBloomKey(number, hash)); !has || err != nil {
+		return false
+	}
+	return true
+}
+
+// ReadTxBloomRLP retrieves a block's transaciton bloom filter corresponding to the hash in RLP encoding.
+func ReadTxBloomRLP(db ethdb.Reader, hash common.Hash, number uint64) rlp.RawValue {
+	var data []byte
+	db.ReadAncients(func(reader ethdb.AncientReaderOp) error {
+		// Check if the data is in ancients
+		if isCanon(reader, number, hash) {
+			data, _ = reader.Ancient(ChainFreezerTransactionBloomTable, number)
+			return nil
+		}
+		// If not, try reading from leveldb
+		data, _ = db.Get(blockTransactionBloomKey(number, hash))
+		return nil
+	})
+	return data
+}
+
+// ReadTxBloom retrieves a block's transaction bloom filter corresponding to the hash.
+func ReadTxBloom(db ethdb.Reader, hash common.Hash, number uint64) *[]byte {
+	data := ReadTxBloomRLP(db, hash, number)
+	if len(data) == 0 {
+		return nil
+	}
+	bloom := new([]byte)
+	if err := rlp.DecodeBytes(data, bloom); err != nil {
+		log.Error("Invalid block transaction bloom RLP", "hash", hash, "err", err)
+		return nil
+	}
+	return bloom
+}
+
+// WriteTxBloom stores the total difficulty of a block into the database.
+func WriteTxBloom(db ethdb.KeyValueWriter, hash common.Hash, number uint64, bloom *[]byte) {
+	data, err := rlp.EncodeToBytes(bloom)
+	if err != nil {
+		log.Crit("Failed to RLP encode block transaction bloom", "err", err)
+	}
+	if err := db.Put(blockTransactionBloomKey(number, hash), data); err != nil {
+		log.Crit("Failed to store block transaction bloom", "err", err)
+	}
+}
+
+func WriteTxBloomByBlock(db ethdb.KeyValueWriter, block *types.Block, config *params.ChainConfig) *[]byte {
+	txBloom, err := types.TransactionsBloom(block.Body().Transactions, types.MakeSigner(config, block.Number(), block.Time()))
+	if err != nil {
+		log.Crit("Failed to create transactions bloom", "hash", block.Hash(), "number", block.NumberU64(), "err", err)
+	}
+	WriteTxBloom(db, block.Hash(), block.NumberU64(), &txBloom)
+	return &txBloom
+}
+
+// DeleteTd removes all block total difficulty data associated with a hash.
+func DeleteTxBloom(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
+	if err := db.Delete(blockTransactionBloomKey(number, hash)); err != nil {
+		log.Crit("Failed to delete block transaction bloom", "err", err)
+	}
+}
+
