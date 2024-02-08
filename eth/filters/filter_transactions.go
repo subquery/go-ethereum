@@ -156,7 +156,7 @@ func (f *TxFilter) Transactions(ctx context.Context) ([]*ethapi.RPCTransaction, 
 	defer close(limitChan)
 
 	txChan, errChan := f.rangeTransactionsAsync(ctx, limitChan)
-	var txs []*ethapi.RPCTransaction
+	txs := []*ethapi.RPCTransaction{}
 
 	var checkLimit = func() bool {
 		if f.limit == 0 {
@@ -335,14 +335,14 @@ func (f *TxFilter) blockTransactions(ctx context.Context, header *types.Header) 
 	if bloomTxFilter(bloom, f.filterAddresses(), f.sigHashes) {
 		return f.checkMatches(ctx, header)
 	}
-	return nil, nil
+	return []*ethapi.RPCTransaction{}, nil
 }
 
 // pendingTransactions returns the transactions matching the filter criteria within the pending block.
 func (f *TxFilter) pendingTransactions() ([]*ethapi.RPCTransaction, error) {
 	block, _ := f.sys.backend.PendingBlockAndReceipts()
 	if block == nil {
-		return nil, nil
+		return []*ethapi.RPCTransaction{}, nil
 	}
 
 	// calculate the tx bloom filter for the pending block
@@ -353,14 +353,14 @@ func (f *TxFilter) pendingTransactions() ([]*ethapi.RPCTransaction, error) {
 	}
 
 	if bloomTxFilter(types.BytesToBloom(bloomBytes), f.filterAddresses(), f.sigHashes) {
-		var rpcTxs []*ethapi.RPCTransaction
+		rpcTxs := []*ethapi.RPCTransaction{}
 		for i, tx := range block.Transactions() {
 			rpcTx := ethapi.NewRPCTransaction(tx, block.Header(), uint64(i), f.sys.backend.ChainConfig())
 			rpcTxs = append(rpcTxs, &rpcTx)
 		}
 		return f.childFilterTransactions(rpcTxs), nil
 	}
-	return nil, nil
+	return []*ethapi.RPCTransaction{}, nil
 }
 
 // checkMatches checks if the receipts belonging to the given header contain any log events that
@@ -376,7 +376,7 @@ func (f *TxFilter) checkMatches(ctx context.Context, header *types.Header) ([]*e
 	}
 
 	// rpcTxs := make([]ethapi.RPCTransaction, len(body.Transactions))
-	var rpcTxs []*ethapi.RPCTransaction
+	rpcTxs := []*ethapi.RPCTransaction{}
 	for i, tx := range body.Transactions {
 		rpcTx := ethapi.NewRPCTransaction(tx, header, uint64(i), f.sys.backend.ChainConfig())
 		rpcTxs = append(rpcTxs, &rpcTx)
@@ -384,7 +384,7 @@ func (f *TxFilter) checkMatches(ctx context.Context, header *types.Header) ([]*e
 
 	txs := f.childFilterTransactions(rpcTxs)
 	if len(txs) == 0 {
-		return nil, nil
+		return []*ethapi.RPCTransaction{}, nil
 	}
 
 	return txs, nil
@@ -395,7 +395,7 @@ func (f *TxFilter) childFilterTransactions(txs []*ethapi.RPCTransaction) []*etha
 		return filterTransactions(txs, nil, nil, f.fromAddresses, f.toAddresses, f.sigHashes)
 	}
 
-	var ret []*ethapi.RPCTransaction
+	ret := []*ethapi.RPCTransaction{}
 	for _, tx := range txs {
 		for _, f := range f.childFilters {
 			if filterTransaction(tx, nil, nil, f.fromAddresses, f.toAddresses, f.sigHashes) {
@@ -409,7 +409,7 @@ func (f *TxFilter) childFilterTransactions(txs []*ethapi.RPCTransaction) []*etha
 }
 
 func filterTransactions(txs []*ethapi.RPCTransaction, fromBlock, toBlock *big.Int, fromAddresses, toAddresses []common.Address, sigHashes [][]byte) []*ethapi.RPCTransaction {
-	var ret []*ethapi.RPCTransaction
+	ret := []*ethapi.RPCTransaction{}
 	for _, tx := range txs {
 		if filterTransaction(tx, fromBlock, toBlock, fromAddresses, toAddresses, sigHashes) {
 			ret = append(ret, tx)
