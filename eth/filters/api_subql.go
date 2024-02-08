@@ -119,12 +119,12 @@ func (api *SubqlAPI) FilterBlocks(ctx context.Context, blockFilter BlockFilter) 
 			rangeFilters = append(rangeFilters, api.sys.NewRangeFilterWithLimit(logFilter.FromBlock.Int64(), logFilter.ToBlock.Int64(), blockFilter.Limit, logFilter.Addresses, logFilter.Topics))
 		}
 
-		txf, err := api.sys.NewBatchRangeFilter(rangeFilters)
+		logf, err := api.sys.NewBatchRangeFilter(rangeFilters)
 		if err != nil {
 			return nil, err
 		}
-		logResults, err = txf.Logs(ctx)
 
+		logResults, err = logf.Logs(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -371,5 +371,18 @@ func (args *BlockFilter) UnmarshalJSON(data []byte) error {
 func decodeFilterTopics(f FieldFilter) ([][]common.Hash, error) {
 	rawTopics := []interface{}{f["topics0"], f["topics1"], f["topics2"], f["topics3"]}
 
-	return decodeTopics(rawTopics)
+	decoded, err := decodeTopics(rawTopics)
+	if err != nil {
+		return nil, err
+	}
+
+	// Remove empty arrays
+	filtered := [][]common.Hash{}
+	for _, topic := range decoded {
+		if len(topic) > 0 {
+			filtered = append(filtered, topic)
+		}
+	}
+
+	return filtered, nil
 }
