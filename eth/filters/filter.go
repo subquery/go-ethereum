@@ -84,7 +84,6 @@ func (sys *FilterSystem) NewRangeFilterWithLimit(begin, end, limit int64, addres
 }
 
 func (sys *FilterSystem) NewBatchRangeFilter(filters []*Filter) (*Filter, error) {
-
 	if len(filters) == 0 {
 		return nil, errors.New("At least one filter is required")
 	}
@@ -105,7 +104,7 @@ func (sys *FilterSystem) NewBatchRangeFilter(filters []*Filter) (*Filter, error)
 		end = int64(math.Max(float64(end), float64(f.end)))
 		limit = int64(math.Max(float64(limit), float64(f.limit)))
 		addresses = append(addresses, f.addresses...)
-		topics = append(topics, f.topics...)
+		topics = zipTopics(topics, f.topics)
 	}
 
 	batched := sys.NewRangeFilterWithLimit(begin, end, limit, addresses, topics)
@@ -478,4 +477,25 @@ func resolveSpecial(sys *FilterSystem, ctx context.Context, number int64) (int64
 		return number, nil
 	}
 	return hdr.Number.Int64(), nil
+}
+
+// Function to zip two arrays of arrays
+func zipTopics(topics1, topics2 [][]common.Hash) [][]common.Hash {
+	// Ensure both arrays have the same length
+	minLen := len(topics1)
+	if len(topics2) < minLen {
+		minLen = len(topics2)
+	}
+
+	// Initialize the zipped array
+	zipped := make([][]common.Hash, minLen)
+
+	// Zip the arrays
+	for i := 0; i < minLen; i++ {
+		zipped[i] = make([]common.Hash, len(topics1[i])+len(topics2[i]))
+		copy(zipped[i], topics1[i])
+		copy(zipped[i][len(topics1[i]):], topics2[i])
+	}
+
+	return zipped
 }
