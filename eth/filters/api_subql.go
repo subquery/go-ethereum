@@ -3,9 +3,6 @@ package filters
 import (
 	"context"
 	"encoding/json"
-	"math"
-	"math/big"
-	"sort"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -13,13 +10,10 @@ import (
 	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
+	"math"
+	"math/big"
+	"sort"
 )
-
-type Header struct {
-	Hash       common.Hash  `json:"hash"`
-	Number     *hexutil.Big `json:"number"`
-	ParentHash common.Hash  `json:"parentHash"`
-}
 
 type BlockResult struct {
 	Blocks      []*Block        `json:"blocks"`
@@ -28,17 +22,32 @@ type BlockResult struct {
 }
 
 type Block struct {
-	Header       *Header                 `json:"header"`
+	Header       *types.Header           `json:"header"`
 	Transactions []ethapi.RPCTransaction `json:"transactions,omitempty"`
-	Logs         []types.Log             `json:"logs,omitempty"`
+	Logs         []*types.Log            `json:"logs,omitempty"`
 }
 
 type BlockRequest struct {
-	FromBlock   *rpc.BlockNumber `json:"fromBlock"`
-	ToBlock     *rpc.BlockNumber `json:"toBlock"`
-	Limit       *hexutil.Big     `json:"limit"`
-	BlockFilter EntityFilter     `json:"blockFilter,omitempty"`
-	// FieldSelector FieldSelector `json:"fieldSelector"`
+	FromBlock     *rpc.BlockNumber `json:"fromBlock"`
+	ToBlock       *rpc.BlockNumber `json:"toBlock"`
+	Limit         *hexutil.Big     `json:"limit"`
+	BlockFilter   EntityFilter     `json:"blockFilter,omitempty"`
+	FieldSelector *FieldSelector   `json:"fieldSelector"`
+}
+
+type LogsSelector struct {
+	Transaction bool `json:"transaction"`
+	// TODO add specific fields
+}
+
+type TransactionsSelector struct {
+	Log bool `json:"log"`
+	// TODO add specific fields
+}
+
+type FieldSelector struct {
+	Logs         *LogsSelector         `json:"logs"`
+	Transactions *TransactionsSelector `json:"transactions"`
 }
 
 type FieldFilter map[string][]interface{}
@@ -148,7 +157,7 @@ func (api *SubqlAPI) FilterBlocks(ctx context.Context, blockFilter BlockFilter) 
 		}
 	}
 
-	result.Blocks, err = api.buildBlocks(ctx, txResults, logResults, blockFilter.Limit)
+	result.Blocks, err = api.buildBlocks(ctx, txResults, logResults, blockFilter.Limit, blockFilter.FieldSelector)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +178,7 @@ func (api *SubqlAPI) FilterBlocks(ctx context.Context, blockFilter BlockFilter) 
 }
 
 // buildBlocks assembles the filtered logs/transactions into the correct Block structure
-func (api *SubqlAPI) buildBlocks(ctx context.Context, txs []*ethapi.RPCTransaction, logs []*types.Log, limit int64) ([]*Block, error) {
+func (api *SubqlAPI) buildBlocks(ctx context.Context, txs []*ethapi.RPCTransaction, logs []*types.Log, limit int64, fieldSelector *FieldSelector) ([]*Block, error) {
 	grouped := map[uint64]*Block{}
 
 	for _, log := range logs {
@@ -189,11 +198,11 @@ func (api *SubqlAPI) buildBlocks(ctx context.Context, txs []*ethapi.RPCTransacti
 	// Sort the keys (block heights)
 	keys := make([]uint64, 0, len(grouped))
 	for k := range grouped {
-		keys = append(keys, k);
+		keys = append(keys, k)
 	}
-	sort.Slice(keys, func (i, j int) bool {
+	sort.Slice(keys, func(i, j int) bool {
 		return keys[i] < keys[j]
-	});
+	})
 
 	// Convert the map to an array
 	res := make([]*Block, 0, capacity)
@@ -201,6 +210,54 @@ func (api *SubqlAPI) buildBlocks(ctx context.Context, txs []*ethapi.RPCTransacti
 		if i > capacity {
 			break
 		}
+
+		logTxs := []ethapi.RPCTransaction{}
+		txLogs := []*types.Log{}
+
+		// Fill in transactions for logs
+		if fieldSelector.Logs != nil && fieldSelector.Logs.Transaction {
+			log.Info("Fetching transactions for logs")
+			for _, log := range grouped[k].Logs {
+				_, tx, _, index, _, err := api.backend.GetTransaction(ctx, log.TxHash)
+				rpcTx := ethapi.NewRPCTransaction(tx, grouped[k].Header, index, api.sys.backend.ChainConfig())
+				if err != nil {
+					return nil, err
+				}
+				logTxs = append(logTxs, rpcTx)
+			}
+		}
+
+		// Fill in logs for transactions
+		if fieldSelector.Transactions != nil && fieldSelector.Transactions.Log {
+			// Get all the logs for a block
+			blockLogs, err := api.backend.GetLogs(ctx, grouped[k].Header.Hash(), grouped[k].Header.Number.Uint64())
+			if err != nil {
+				return nil, err
+			}
+			for _, logs := range blockLogs {
+				if len(logs) > 0 && includesFn(grouped[k].Transactions, func(tx ethapi.RPCTransaction) bool {
+					return tx.Hash == logs[0].TxHash
+				}) {
+					txLogs = append(txLogs, logs[:]...)
+				}
+			}
+		}
+
+		// Any added logs/transactions need to be appended and sorted
+		if len(logTxs) > 0 {
+			grouped[k].Transactions = append(grouped[k].Transactions, logTxs[:]...)
+			sort.Slice(grouped[k].Transactions, func(i, j int) bool {
+				return *grouped[k].Transactions[i].TransactionIndex < *grouped[k].Transactions[j].TransactionIndex
+			})
+		}
+
+		if len(txLogs) > 0 {
+			grouped[k].Logs = append(grouped[k].Logs, txLogs[:]...)
+			sort.Slice(grouped[k].Logs, func(i, j int) bool {
+				return grouped[k].Logs[i].Index < grouped[k].Logs[j].Index
+			})
+		}
+
 		res = append(res, grouped[k])
 	}
 
@@ -211,7 +268,7 @@ func (api *SubqlAPI) blocksAddTx(ctx context.Context, blocks *map[uint64]*Block,
 	num := tx.BlockNumber.ToInt().Uint64()
 	block, ok := (*blocks)[num]
 	if !ok {
-		header, err := api.getHeader(ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()))
+		header, err := api.sys.backend.HeaderByNumber(ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()))
 		if err != nil {
 			return err
 		}
@@ -219,7 +276,7 @@ func (api *SubqlAPI) blocksAddTx(ctx context.Context, blocks *map[uint64]*Block,
 		(*blocks)[num] = &Block{
 			Header:       header,
 			Transactions: []ethapi.RPCTransaction{*tx},
-			Logs:         []types.Log{},
+			Logs:         []*types.Log{},
 		}
 	} else {
 		block.Transactions = append(block.Transactions, *tx)
@@ -229,10 +286,9 @@ func (api *SubqlAPI) blocksAddTx(ctx context.Context, blocks *map[uint64]*Block,
 }
 
 func (api *SubqlAPI) blocksAddLog(ctx context.Context, blocks *map[uint64]*Block, log *types.Log) error {
-
 	block, ok := (*blocks)[log.BlockNumber]
 	if !ok {
-		header, err := api.getHeader(ctx, rpc.BlockNumber(log.BlockNumber))
+		header, err := api.sys.backend.HeaderByNumber(ctx, rpc.BlockNumber(log.BlockNumber))
 		if err != nil {
 			return err
 		}
@@ -240,10 +296,10 @@ func (api *SubqlAPI) blocksAddLog(ctx context.Context, blocks *map[uint64]*Block
 		(*blocks)[log.BlockNumber] = &Block{
 			Header:       header,
 			Transactions: []ethapi.RPCTransaction{},
-			Logs:         []types.Log{*log},
+			Logs:         []*types.Log{log},
 		}
 	} else {
-		block.Logs = append(block.Logs, *log)
+		block.Logs = append(block.Logs, log)
 	}
 
 	return nil
@@ -261,19 +317,6 @@ func (api *SubqlAPI) getGenesisHeader(ctx context.Context) error {
 	return nil
 }
 
-func (api *SubqlAPI) getHeader(ctx context.Context, blockNum rpc.BlockNumber) (*Header, error) {
-	fullHeader, err := api.sys.backend.HeaderByNumber(ctx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Header{
-		Hash:       fullHeader.Hash(),
-		ParentHash: fullHeader.ParentHash,
-		Number:     (*hexutil.Big)(fullHeader.Number),
-	}, nil
-}
-
 // endHeight gets the minimum indexed height of transactions and logs bloombits
 func (api *SubqlAPI) endHeight() uint64 {
 	sizeTx, sectionsTx := api.backend.TxBloomStatus()
@@ -282,11 +325,12 @@ func (api *SubqlAPI) endHeight() uint64 {
 }
 
 type BlockFilter struct {
-	FromBlock    *big.Int
-	ToBlock      *big.Int
-	Limit        int64
-	Transactions []ethereum.TxFilterQuery
-	Logs         []ethereum.FilterQuery
+	FromBlock     *big.Int
+	ToBlock       *big.Int
+	Limit         int64
+	Transactions  []ethereum.TxFilterQuery
+	Logs          []ethereum.FilterQuery
+	FieldSelector *FieldSelector
 }
 
 func (args *BlockFilter) UnmarshalJSON(data []byte) error {
@@ -307,6 +351,10 @@ func (args *BlockFilter) UnmarshalJSON(data []byte) error {
 
 	if raw.Limit != nil {
 		args.Limit = raw.Limit.ToInt().Int64()
+	}
+
+	if raw.FieldSelector != nil {
+		args.FieldSelector = raw.FieldSelector
 	}
 
 	if logsFilter, ok := raw.BlockFilter["logs"]; ok {
