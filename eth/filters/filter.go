@@ -370,6 +370,15 @@ func includes[T comparable](things []T, element T) bool {
 	return false
 }
 
+func includesFn[T any](things []T, matcher func(thing T) bool) bool {
+	for _, thing := range things {
+		if matcher(thing) {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *Filter) childFilterLogs(logs []*types.Log) []*types.Log {
 	if f.childFilters == nil || len(f.childFilters) == 0 {
 		return filterLogs(logs, nil, nil, f.addresses, f.topics)
