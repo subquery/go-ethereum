@@ -211,57 +211,69 @@ func (api *SubqlAPI) buildBlocks(ctx context.Context, txs []*ethapi.RPCTransacti
 			break
 		}
 
-		logTxs := []ethapi.RPCTransaction{}
-		txLogs := []*types.Log{}
-
-		// Fill in transactions for logs
-		if fieldSelector.Logs != nil && fieldSelector.Logs.Transaction {
-			log.Info("Fetching transactions for logs")
-			for _, log := range grouped[k].Logs {
-				_, tx, _, index, _, err := api.backend.GetTransaction(ctx, log.TxHash)
-				rpcTx := ethapi.NewRPCTransaction(tx, grouped[k].Header, index, api.sys.backend.ChainConfig())
-				if err != nil {
-					return nil, err
-				}
-				logTxs = append(logTxs, rpcTx)
-			}
-		}
-
-		// Fill in logs for transactions
-		if fieldSelector.Transactions != nil && fieldSelector.Transactions.Log {
-			// Get all the logs for a block
-			blockLogs, err := api.backend.GetLogs(ctx, grouped[k].Header.Hash(), grouped[k].Header.Number.Uint64())
-			if err != nil {
-				return nil, err
-			}
-			for _, logs := range blockLogs {
-				if len(logs) > 0 && includesFn(grouped[k].Transactions, func(tx ethapi.RPCTransaction) bool {
-					return tx.Hash == logs[0].TxHash
-				}) {
-					txLogs = append(txLogs, logs[:]...)
-				}
-			}
-		}
-
-		// Any added logs/transactions need to be appended and sorted
-		if len(logTxs) > 0 {
-			grouped[k].Transactions = append(grouped[k].Transactions, logTxs[:]...)
-			sort.Slice(grouped[k].Transactions, func(i, j int) bool {
-				return *grouped[k].Transactions[i].TransactionIndex < *grouped[k].Transactions[j].TransactionIndex
-			})
-		}
-
-		if len(txLogs) > 0 {
-			grouped[k].Logs = append(grouped[k].Logs, txLogs[:]...)
-			sort.Slice(grouped[k].Logs, func(i, j int) bool {
-				return grouped[k].Logs[i].Index < grouped[k].Logs[j].Index
-			})
-		}
+		api.resolveFieldSelector(ctx, fieldSelector, grouped[k])
 
 		res = append(res, grouped[k])
 	}
 
 	return res, nil
+}
+
+
+// Resolves any relevant logs for transactions and transactions for logs if requested by the field selector
+func (api *SubqlAPI) resolveFieldSelector(ctx context.Context, fieldSelector *FieldSelector, block *Block) error {
+	if fieldSelector == nil {
+		return nil
+	}
+
+	logTxs := []ethapi.RPCTransaction{}
+	txLogs := []*types.Log{}
+
+	// Fill in transactions for logs
+	if fieldSelector.Logs != nil && fieldSelector.Logs.Transaction {
+		log.Info("Fetching transactions for logs")
+		for _, log := range block.Logs {
+			_, tx, _, index, _, err := api.backend.GetTransaction(ctx, log.TxHash)
+			rpcTx := ethapi.NewRPCTransaction(tx, block.Header, index, api.sys.backend.ChainConfig())
+			if err != nil {
+				return err
+			}
+			logTxs = append(logTxs, rpcTx)
+		}
+	}
+
+	// Fill in logs for transactions
+	if fieldSelector.Transactions != nil && fieldSelector.Transactions.Log {
+		// Get all the logs for a block
+		blockLogs, err := api.backend.GetLogs(ctx, block.Header.Hash(), block.Header.Number.Uint64())
+		if err != nil {
+			return err
+		}
+		for _, logs := range blockLogs {
+			if len(logs) > 0 && includesFn(block.Transactions, func(tx ethapi.RPCTransaction) bool {
+				return tx.Hash == logs[0].TxHash
+			}) {
+				txLogs = append(txLogs, logs[:]...)
+			}
+		}
+	}
+
+	// Any added logs/transactions need to be appended and sorted
+	if len(logTxs) > 0 {
+		block.Transactions = append(block.Transactions, logTxs[:]...)
+		sort.Slice(block.Transactions, func(i, j int) bool {
+			return *block.Transactions[i].TransactionIndex < *block.Transactions[j].TransactionIndex
+		})
+	}
+
+	if len(txLogs) > 0 {
+		block.Logs = append(block.Logs, txLogs[:]...)
+		sort.Slice(block.Logs, func(i, j int) bool {
+			return block.Logs[i].Index < block.Logs[j].Index
+		})
+	}
+
+	return nil
 }
 
 func (api *SubqlAPI) blocksAddTx(ctx context.Context, blocks *map[uint64]*Block, tx *ethapi.RPCTransaction) error {
