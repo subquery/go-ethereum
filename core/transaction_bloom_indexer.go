@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/bitutil"
@@ -48,9 +49,12 @@ func (b *TransactionBloomIndexer) Reset(ctx context.Context, section uint64, las
 // the index.
 func (b *TransactionBloomIndexer) Process(ctx context.Context, header *types.Header) error {
 	// Get the bloom value from the db
-	bloom := b.getOrCreateTxBloom(header)
+	bloom, err := b.getOrCreateTxBloom(header)
+	if err != nil {
+		return err;
+	}
 	// Add the bloom value to the bloombits
-	b.gen.AddBloom(uint(header.Number.Uint64()-b.section*b.size), bloom)
+	b.gen.AddBloom(uint(header.Number.Uint64()-b.section*b.size), *bloom)
 	b.head = header.Hash()
 	return nil
 }
@@ -75,13 +79,18 @@ func (b *TransactionBloomIndexer) Prune(threshold uint64) error {
 }
 
 // getOrCreateTxBloom fetches the transactions bloom for the block, if it doesn't exist it will create the transaction bloom and save it
-func (b* TransactionBloomIndexer) getOrCreateTxBloom(header *types.Header) types.Bloom {
+func (b* TransactionBloomIndexer) getOrCreateTxBloom(header *types.Header) (*types.Bloom, error) {
 	bloom := rawdb.ReadTxBloom(b.db, header.Hash(), header.Number.Uint64())
 
 	if bloom == nil {
 		block := rawdb.ReadBlock(b.db, header.Hash(), header.Number.Uint64())
+		if block == nil {
+			return nil, fmt.Errorf("Failed to get block to index transactions bloom. number='%v' hash='%v'", header.Number.Uint64(), header.Hash().Hex())
+		}
 		bloom = rawdb.WriteTxBloomByBlock(b.db, block, b.config)
 	}
 
-	return types.BytesToBloom(*bloom)
+	bloomBytes := types.BytesToBloom(*bloom)
+
+	return &bloomBytes, nil
 }
