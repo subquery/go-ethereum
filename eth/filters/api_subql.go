@@ -231,7 +231,6 @@ func (api *SubqlAPI) resolveFieldSelector(ctx context.Context, fieldSelector *Fi
 
 	// Fill in transactions for logs
 	if fieldSelector.Logs != nil && fieldSelector.Logs.Transaction {
-		log.Info("Fetching transactions for logs")
 		for _, log := range block.Logs {
 			_, tx, _, index, _, err := api.backend.GetTransaction(ctx, log.TxHash)
 			rpcTx := ethapi.NewRPCTransaction(tx, block.Header, index, api.sys.backend.ChainConfig())
