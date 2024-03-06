@@ -68,6 +68,7 @@ type Capability struct {
 	Filters            map[string][]string `json:"filters"`
 	SupportedResponses []string            `json:"supportedResponses"`
 	GenesisHash        string              `json:"genesisHash"`
+	ChainId            string              `json:"chainId"`
 }
 
 func NewSubqlApi(sys *FilterSystem, backend ethapi.Backend) *SubqlAPI {
@@ -103,6 +104,7 @@ func (api *SubqlAPI) FilterBlocksCapabilities(ctx context.Context) (*Capability,
 	}
 
 	res.GenesisHash = api.genesisHeader.Hash().Hex()
+	res.ChainId = api.backend.ChainConfig().ChainID.String()
 
 	return res, nil
 }
@@ -218,7 +220,6 @@ func (api *SubqlAPI) buildBlocks(ctx context.Context, txs []*ethapi.RPCTransacti
 
 	return res, nil
 }
-
 
 // Resolves any relevant logs for transactions and transactions for logs if requested by the field selector
 func (api *SubqlAPI) resolveFieldSelector(ctx context.Context, fieldSelector *FieldSelector, block *Block) error {
