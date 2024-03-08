@@ -1,4 +1,4 @@
-name: "Release"
+name: "Publish Docker"
 on:
   # workflow_dispatch:
   push:
@@ -98,7 +98,7 @@ jobs:
           platforms: arm64,amd64
           file: Dockerfile
           # TODO bring back latest
-          tags: subquerynetwork/geth-client:${{ github.ref_name }}
+          tags: subquerynetwork/data-node-go-ethereum:${{ github.ref_name }}
           build-args: |
             COMMIT=${{github.sha}}
             VERSION=${{github.ref_name}}
