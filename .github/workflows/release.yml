@@ -1,19 +1,12 @@
 name: "Publish Docker"
 on:
-  workflow_dispatch:
-    inputs:
-      isLatest:
-        description: 'Add latest tag'
-        default: 'true'
-        required: true
+  push:
+    tags:
+      - '*' # Push events to every tag
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    env:
-      DOCKER_HUB_USERNAME: subquerynetwork
-      DOCKRE_HUB_PASSWORD: ${{ secrets.SQ_DOCKERHUB_TOKEN }}
-      DOCKER_CLI_EXPERIMENTAL: enabled
     steps:
       - uses: actions/checkout@v2
       - name: Set up Go
@@ -21,15 +14,31 @@ jobs:
         with:
           go-version: 1.21.4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to DockerHub
-        uses: docker/login-action@v1
+        uses: docker/login-action@v3
         with:
           username: subquerynetwork
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          password: ${{ secrets.SQ_DOCKERHUB_TOKEN }}
 
       - name: Build Docker
         run: go run build/ci.go docker -image -manifest amd64,arm64 -upload subquerynetwork/geth
 
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: arm64,amd64
+          file: Dockerfile
+          # TODO bring back latest
+          tags: subquerynetwork/geth-client:${{ github.ref_name }}
+          build-args: |
+            COMMIT=${{github.sha}}
+            VERSION=${{github.ref_name}}
+            BUILDNUM=${{github.run_number}}
