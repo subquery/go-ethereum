@@ -9,6 +9,7 @@ on:
 
 jobs:
   publish:
+    runs-on: ubuntu-latest
     env:
       DOCKER_HUB_USERNAME: subquerynetwork
       DOCKRE_HUB_PASSWORD: ${{ secrets.SQ_DOCKERHUB_TOKEN }}
