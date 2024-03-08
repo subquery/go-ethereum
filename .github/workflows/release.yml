@@ -11,7 +11,7 @@ jobs:
   publish:
     env:
       DOCKER_HUB_USERNAME: subquerynetwork
-      DOCKRE_HUB_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKRE_HUB_PASSWORD: ${{ secrets.SQ_DOCKERHUB_TOKEN }}
       DOCKER_CLI_EXPERIMENTAL: enabled
     steps:
       - uses: actions/checkout@v2
