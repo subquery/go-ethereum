@@ -1,0 +1,34 @@
+name: "Publish Docker"
+on:
+  workflow_dispatch:
+    inputs:
+      isLatest:
+        description: 'Add latest tag'
+        default: 'true'
+        required: true
+
+jobs:
+  publish:
+    env:
+      DOCKER_HUB_USERNAME: subquerynetwork
+      DOCKRE_HUB_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKER_CLI_EXPERIMENTAL: enabled
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.21.4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: subquerynetwork
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker
+        run: go run build/ci.go docker -image -manifest amd64,arm64 -upload subquerynetwork/geth
+
