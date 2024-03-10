@@ -1,44 +1,83 @@
 name: "Publish Docker"
 on:
+  workflow_dispatch:
   push:
     tags:
       - '*' # Push events to every tag
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  release-matrix:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        arch: ['386', 'arm']
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5
         with:
           go-version: 1.21.4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Build
+        run: go run build/ci.go install -dlgo -arch ${{ matrix.arch }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Prepare binary
+        run: tar -czvf subquery-geth-${{ platform }}-${{ matrix.arch }}-${{ github.ref_name }}.tar.gz ./build/bin/geth
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
+      # TODO SHA-256
+
+      - name: Archive binary
+        uses: actions/upload-artifact@v4
         with:
-          username: subquerynetwork
-          password: ${{ secrets.SQ_DOCKERHUB_TOKEN }}
+          name: dist-without-markdown
+          path: subquery-geth-${{ platform }}-${{ matrix.arch }}-${{ github.ref_name }}.tar.gz
 
-      - name: Build Docker
-        run: go run build/ci.go docker -image -manifest amd64,arm64 -upload subquerynetwork/geth
+  release:
+    runs-on: ubuntu-latest
+    steps:
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        path: artifacts
+
+      - name: Inspect artifacts
+        run: ls -R artifacts
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          context: .
-          push: true
-          platforms: arm64,amd64
-          file: Dockerfile
-          # TODO bring back latest
-          tags: subquerynetwork/geth-client:${{ github.ref_name }}
-          build-args: |
-            COMMIT=${{github.sha}}
-            VERSION=${{github.ref_name}}
-            BUILDNUM=${{github.run_number}}
+          files: artifacts/**/*
+
+  ## This is working
+  # publish-docker:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+
+  #     - name: Set up QEMU
+  #       uses: docker/setup-qemu-action@v3
+
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+
+  #     - name: Login to DockerHub
+  #       uses: docker/login-action@v3
+  #       with:
+  #         username: subquerynetwork
+  #         password: ${{ secrets.SQ_DOCKERHUB_TOKEN }}
+
+  #     - name: Build and push
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: .
+  #         push: true
+  #         platforms: arm64,amd64
+  #         file: Dockerfile
+  #         # TODO bring back latest
+  #         tags: subquerynetwork/geth-client:${{ github.ref_name }}
+  #         build-args: |
+  #           COMMIT=${{github.sha}}
+  #           VERSION=${{github.ref_name}}
+  #           BUILDNUM=${{github.run_number}}
