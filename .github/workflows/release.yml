@@ -32,11 +32,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install gcc-multilib
 
       - name: setup gcc
-        if: ${{ matrix.arch }} == arm
+        if: matrix.arch == 'arm'
         run: sudo apt-get install gcc-arm-linux-gnueabi
 
       - name: setup gcc
-        if: ${{ matrix.arch }} == arm64
+        if: matrix.arch == 'arm64'
         run: sudo apt-get install gcc-aarch64-linux-gnu
 
       - name: Build
