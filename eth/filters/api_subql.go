@@ -395,7 +395,7 @@ func (args *BlockFilter) UnmarshalJSON(data []byte) error {
 	}
 
 	if txsFilter, ok := raw.BlockFilter["transactions"]; ok {
-		args.Logs = []ethereum.FilterQuery{}
+		args.Transactions = []ethereum.TxFilterQuery{}
 
 		for _, txFilter := range txsFilter {
 			fromAddresses, err := decodeAddresses(txFilter["from"])
