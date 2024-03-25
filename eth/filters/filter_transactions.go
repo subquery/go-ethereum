@@ -148,7 +148,8 @@ func (f *TxFilter) Transactions(ctx context.Context) ([]*ethapi.RPCTransaction, 
 	txChan, errChan := f.rangeTransactionsAsync(ctx, limitChan)
 	txs := []*ethapi.RPCTransaction{}
 
-	var checkLimit = func() bool {
+	// Checks whether the new txs are over the limit, if they are we don't append the new txs
+	var checkLimit = func(newTxs ...*ethapi.RPCTransaction) bool {
 		if f.limit == 0 {
 			return false
 		}
@@ -163,8 +164,11 @@ func (f *TxFilter) Transactions(ctx context.Context) ([]*ethapi.RPCTransaction, 
 			blocks[tx.BlockNumber.ToInt().Uint64()] = true
 		}
 
-		if len(blocks) >= int(f.limit) {
-			limitChan <- true
+		for _, tx := range newTxs {
+			blocks[tx.BlockNumber.ToInt().Uint64()] = true
+		}
+
+		if len(blocks) > int(f.limit) {
 			return true
 		}
 
@@ -174,10 +178,11 @@ func (f *TxFilter) Transactions(ctx context.Context) ([]*ethapi.RPCTransaction, 
 	for {
 		select {
 		case tx := <-txChan:
-			txs = append(txs, tx)
 			if checkLimit() {
+				limitChan <- true
 				return txs, nil
 			}
+			txs = append(txs, tx)
 		case err := <-errChan:
 			return txs, err
 		}
