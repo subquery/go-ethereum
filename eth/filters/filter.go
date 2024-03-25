@@ -167,8 +167,8 @@ func (f *Filter) Logs(ctx context.Context) ([]*types.Log, error) {
 	logChan, errChan := f.rangeLogsAsync(ctx, limitChan)
 	var logs []*types.Log
 
-	// TODO limit is for number of blocks not number of logs
-	var checkLimit = func() bool {
+	// Checks whether the new logs are over the limit, if they are we don't append the new logs
+	var checkLimit = func(newLogs ...*types.Log) bool {
 		if f.limit == 0 {
 			return false
 		}
@@ -183,8 +183,11 @@ func (f *Filter) Logs(ctx context.Context) ([]*types.Log, error) {
 			blocks[log.BlockNumber] = true
 		}
 
-		if len(blocks) >= int(f.limit) {
-			limitChan <- true
+		for _, log := range newLogs {
+			blocks[log.BlockNumber] = true
+		}
+
+		if len(blocks) > int(f.limit) {
 			return true
 		}
 
@@ -194,10 +197,11 @@ func (f *Filter) Logs(ctx context.Context) ([]*types.Log, error) {
 	for {
 		select {
 		case log := <-logChan:
-			logs = append(logs, log)
-			if checkLimit() {
+			if checkLimit(log) {
+				limitChan <- true
 				return logs, nil
 			}
+			logs = append(logs, log)
 		case err := <-errChan:
 			return logs, err
 		}
