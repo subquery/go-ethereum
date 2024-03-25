@@ -187,7 +187,7 @@ func (f *Filter) Logs(ctx context.Context) ([]*types.Log, error) {
 			blocks[log.BlockNumber] = true
 		}
 
-		if len(blocks) > int(f.limit) {
+		if len(blocks) >= int(f.limit) {
 			return true
 		}
 

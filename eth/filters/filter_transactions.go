@@ -168,7 +168,7 @@ func (f *TxFilter) Transactions(ctx context.Context) ([]*ethapi.RPCTransaction, 
 			blocks[tx.BlockNumber.ToInt().Uint64()] = true
 		}
 
-		if len(blocks) > int(f.limit) {
+		if len(blocks) >= int(f.limit) {
 			return true
 		}
 
