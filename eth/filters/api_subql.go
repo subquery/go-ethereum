@@ -22,9 +22,9 @@ type BlockResult struct {
 }
 
 type Block struct {
-	Header       *types.Header           `json:"header"`
-	Transactions []ethapi.RPCTransaction `json:"transactions,omitempty"`
-	Logs         []*types.Log            `json:"logs,omitempty"`
+	Header       *types.Header            `json:"header"`
+	Transactions []*ethapi.RPCTransaction `json:"transactions,omitempty"`
+	Logs         []*types.Log             `json:"logs,omitempty"`
 }
 
 type BlockRequest struct {
@@ -69,6 +69,42 @@ type Capability struct {
 	SupportedResponses []string            `json:"supportedResponses"`
 	GenesisHash        string              `json:"genesisHash"`
 	ChainId            string              `json:"chainId"`
+}
+
+type block struct {
+	Header       *types.Header
+	Transactions map[hexutil.Uint64]*ethapi.RPCTransaction
+	Logs         map[uint]*types.Log
+}
+
+type blocks = map[uint64]*block
+
+func values[M ~map[K]V, K comparable, V any](m M) []V {
+	r := make([]V, 0, len(m))
+	for _, v := range m {
+		r = append(r, v)
+	}
+	return r
+}
+
+func (b *block) toBlock() *Block {
+
+	txs := values(b.Transactions)
+
+	sort.Slice(txs, func(i, j int) bool {
+		return *txs[i].TransactionIndex < *txs[j].TransactionIndex
+	})
+
+	logs := values(b.Logs)
+	sort.Slice(logs, func(i, j int) bool {
+		return logs[i].Index < logs[j].Index
+	})
+
+	return &Block{
+		Header:       b.Header,
+		Transactions: txs,
+		Logs:         logs,
+	}
 }
 
 func NewSubqlApi(sys *FilterSystem, backend ethapi.Backend) *SubqlAPI {
@@ -181,7 +217,7 @@ func (api *SubqlAPI) FilterBlocks(ctx context.Context, blockFilter BlockFilter) 
 
 // buildBlocks assembles the filtered logs/transactions into the correct Block structure
 func (api *SubqlAPI) buildBlocks(ctx context.Context, txs []*ethapi.RPCTransaction, logs []*types.Log, limit int64, fieldSelector *FieldSelector) ([]*Block, error) {
-	grouped := map[uint64]*Block{}
+	grouped := blocks{}
 
 	for _, log := range logs {
 		api.blocksAddLog(ctx, &grouped, log)
@@ -215,14 +251,14 @@ func (api *SubqlAPI) buildBlocks(ctx context.Context, txs []*ethapi.RPCTransacti
 
 		api.resolveFieldSelector(ctx, fieldSelector, grouped[k])
 
-		res = append(res, grouped[k])
+		res = append(res, grouped[k].toBlock())
 	}
 
 	return res, nil
 }
 
 // Resolves any relevant logs for transactions and transactions for logs if requested by the field selector
-func (api *SubqlAPI) resolveFieldSelector(ctx context.Context, fieldSelector *FieldSelector, block *Block) error {
+func (api *SubqlAPI) resolveFieldSelector(ctx context.Context, fieldSelector *FieldSelector, block *block) error {
 	if fieldSelector == nil {
 		return nil
 	}
@@ -233,12 +269,14 @@ func (api *SubqlAPI) resolveFieldSelector(ctx context.Context, fieldSelector *Fi
 	// Fill in transactions for logs
 	if fieldSelector.Logs != nil && fieldSelector.Logs.Transaction {
 		for _, log := range block.Logs {
-			_, tx, _, _/*blockIndex*/, transactionIndex, err := api.backend.GetTransaction(ctx, log.TxHash)
-			rpcTx := ethapi.NewRPCTransaction(tx, block.Header, transactionIndex, api.sys.backend.ChainConfig())
-			if err != nil {
-				return err
+			if _, ok := block.Transactions[hexutil.Uint64(log.TxIndex)]; !ok {
+				_, tx, _, _ /*blockIndex*/, transactionIndex, err := api.backend.GetTransaction(ctx, log.TxHash)
+				rpcTx := ethapi.NewRPCTransaction(tx, block.Header, transactionIndex, api.sys.backend.ChainConfig())
+				if err != nil {
+					return err
+				}
+				logTxs = append(logTxs, rpcTx)
 			}
-			logTxs = append(logTxs, rpcTx)
 		}
 	}
 
@@ -250,68 +288,62 @@ func (api *SubqlAPI) resolveFieldSelector(ctx context.Context, fieldSelector *Fi
 			return err
 		}
 		for _, logs := range blockLogs {
-			if len(logs) > 0 && includesFn(block.Transactions, func(tx ethapi.RPCTransaction) bool {
-				return tx.Hash == logs[0].TxHash
-			}) {
-				txLogs = append(txLogs, logs[:]...)
+			if len(logs) > 0 {
+				if _, ok := block.Transactions[hexutil.Uint64(logs[0].TxIndex)]; ok {
+					txLogs = append(txLogs, logs[:]...)
+				}
 			}
 		}
 	}
 
-	// Any added logs/transactions need to be appended and sorted
-	if len(logTxs) > 0 {
-		block.Transactions = append(block.Transactions, logTxs[:]...)
-		sort.Slice(block.Transactions, func(i, j int) bool {
-			return *block.Transactions[i].TransactionIndex < *block.Transactions[j].TransactionIndex
-		})
+	// Append after resolving so we don't resolve in a loop. e.g log -> transaction -> logs
+	for _, tx := range logTxs {
+		block.Transactions[*tx.TransactionIndex] = &tx
 	}
 
-	if len(txLogs) > 0 {
-		block.Logs = append(block.Logs, txLogs[:]...)
-		sort.Slice(block.Logs, func(i, j int) bool {
-			return block.Logs[i].Index < block.Logs[j].Index
-		})
+	for _, log := range txLogs {
+		block.Logs[log.Index] = log
 	}
 
 	return nil
 }
 
-func (api *SubqlAPI) blocksAddTx(ctx context.Context, blocks *map[uint64]*Block, tx *ethapi.RPCTransaction) error {
+func (api *SubqlAPI) blocksAddTx(ctx context.Context, blocks *blocks, tx *ethapi.RPCTransaction) error {
 	num := tx.BlockNumber.ToInt().Uint64()
-	block, ok := (*blocks)[num]
+	b, ok := (*blocks)[num]
 	if !ok {
 		header, err := api.sys.backend.HeaderByNumber(ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()))
 		if err != nil {
 			return err
 		}
 
-		(*blocks)[num] = &Block{
+		(*blocks)[num] = &block{
 			Header:       header,
-			Transactions: []ethapi.RPCTransaction{*tx},
-			Logs:         []*types.Log{},
+			Transactions: map[hexutil.Uint64]*ethapi.RPCTransaction{*tx.TransactionIndex: tx},
+			Logs:         map[uint]*types.Log{},
 		}
 	} else {
-		block.Transactions = append(block.Transactions, *tx)
+		b.Transactions[*tx.TransactionIndex] = tx
 	}
 
 	return nil
 }
 
-func (api *SubqlAPI) blocksAddLog(ctx context.Context, blocks *map[uint64]*Block, log *types.Log) error {
-	block, ok := (*blocks)[log.BlockNumber]
+func (api *SubqlAPI) blocksAddLog(ctx context.Context, blocks *blocks, log *types.Log) error {
+	b, ok := (*blocks)[log.BlockNumber]
 	if !ok {
 		header, err := api.sys.backend.HeaderByNumber(ctx, rpc.BlockNumber(log.BlockNumber))
 		if err != nil {
 			return err
 		}
 
-		(*blocks)[log.BlockNumber] = &Block{
+		(*blocks)[log.BlockNumber] = &block{
 			Header:       header,
-			Transactions: []ethapi.RPCTransaction{},
-			Logs:         []*types.Log{log},
+			Transactions: map[hexutil.Uint64]*ethapi.RPCTransaction{},
+			Logs:         map[uint]*types.Log{log.Index: log},
 		}
 	} else {
-		block.Logs = append(block.Logs, log)
+		b.Logs[log.Index] = log
 	}
 
 	return nil
