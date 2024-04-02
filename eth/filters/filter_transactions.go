@@ -188,7 +188,7 @@ func (f *TxFilter) Transactions(ctx context.Context) ([]*ethapi.RPCTransaction, 
 	for {
 		select {
 		case tx := <-txChan:
-			if checkLimit() {
+			if checkLimit(tx) {
 				limitChan <- true
 				return txs, nil
 			}
@@ -205,7 +205,7 @@ func (f *TxFilter) Transactions(ctx context.Context) ([]*ethapi.RPCTransaction, 
 					// if an error occurs during extraction, we do return the extracted data
 					return txs, err
 				}
-				if checkLimit() {
+				if checkLimit(pendingTxs...) {
 					limitChan <- true
 
 					// Append any txs that are from the last block
