@@ -178,7 +178,7 @@ func (f *TxFilter) Transactions(ctx context.Context) ([]*ethapi.RPCTransaction, 
 	for {
 		select {
 		case tx := <-txChan:
-			if checkLimit() {
+			if checkLimit(tx) {
 				limitChan <- true
 				return txs, nil
 			}
