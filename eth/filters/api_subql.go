@@ -263,7 +263,7 @@ func (api *SubqlAPI) resolveFieldSelector(ctx context.Context, fieldSelector *Fi
 		return nil
 	}
 
-	logTxs := []ethapi.RPCTransaction{}
+	logTxs := []*ethapi.RPCTransaction{}
 	txLogs := []*types.Log{}
 
 	// Fill in transactions for logs
@@ -275,7 +275,7 @@ func (api *SubqlAPI) resolveFieldSelector(ctx context.Context, fieldSelector *Fi
 				if err != nil {
 					return err
 				}
-				logTxs = append(logTxs, rpcTx)
+				logTxs = append(logTxs, &rpcTx)
 			}
 		}
 	}
@@ -298,7 +298,7 @@ func (api *SubqlAPI) resolveFieldSelector(ctx context.Context, fieldSelector *Fi
 
 	// Append after resolving so we don't resolve in a loop. e.g log -> transaction -> logs
 	for _, tx := range logTxs {
-		block.Transactions[*tx.TransactionIndex] = &tx
+		block.Transactions[*tx.TransactionIndex] = tx
 	}
 
 	for _, log := range txLogs {
