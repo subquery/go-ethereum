@@ -271,10 +271,10 @@ func (api *SubqlAPI) resolveFieldSelector(ctx context.Context, fieldSelector *Fi
 		for _, log := range block.Logs {
 			if _, ok := block.Transactions[hexutil.Uint64(log.TxIndex)]; !ok {
 				_, tx, _, _ /*blockIndex*/, transactionIndex, err := api.backend.GetTransaction(ctx, log.TxHash)
-				rpcTx := ethapi.NewRPCTransaction(tx, block.Header, transactionIndex, api.sys.backend.ChainConfig())
 				if err != nil {
 					return err
 				}
+				rpcTx := ethapi.NewRPCTransaction(tx, block.Header, transactionIndex, api.sys.backend.ChainConfig())
 				logTxs = append(logTxs, &rpcTx)
 			}
 		}
