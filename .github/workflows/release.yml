@@ -1,18 +1,82 @@
 name: "Publish Docker"
 on:
+  # workflow_dispatch:
   push:
     tags:
       - '*' # Push events to every tag
 
 jobs:
-  publish:
+  build-linux-binaries:
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: '386'
+          - os: linux
+            arch: 'amd64'
+          - os: linux
+            arch: 'arm'
+            extraArgs: "-cc arm-linux-gnueabi-gcc"
+          - os: linux
+            arch: 'arm64'
+            extraArgs: "-cc aarch64-linux-gnu-gcc"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5
         with:
           go-version: 1.21.4
+
+      - name: install gcc
+        run: sudo apt-get update && sudo apt-get install gcc-multilib
+
+      - name: setup gcc
+        if: matrix.arch == 'arm'
+        run: sudo apt-get install gcc-arm-linux-gnueabi
+
+      - name: setup gcc
+        if: matrix.arch == 'arm64'
+        run: sudo apt-get install gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: GOOS=${{ matrix.os }} go run build/ci.go install -dlgo --arch ${{ matrix.arch }} ${{ matrix.extraArgs }}
+
+      - name: Prepare binary
+        run: tar -czvf subquery-geth-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.tar.gz ./build/bin/geth
+
+      # TODO SHA-256
+
+      - name: Archive binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: subquery-geth-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.tar.gz
+          path: subquery-geth-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.tar.gz
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build-linux-binaries
+    steps:
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Inspect artifacts
+        run: ls -R artifacts
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: artifacts/**/*.tar.gz
+
+  ## This is working
+  publish-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -34,7 +98,7 @@ jobs:
           platforms: arm64,amd64
           file: Dockerfile
           # TODO bring back latest
-          tags: subquerynetwork/geth-client:${{ github.ref_name }}
+          tags: subquerynetwork/data-node-go-ethereum:${{ github.ref_name }}
           build-args: |
             COMMIT=${{github.sha}}
             VERSION=${{github.ref_name}}
