@@ -230,10 +230,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 	eth.bloomIndexer.Start(eth.blockchain)
-
-	if eth.ArchiveMode() {
-		eth.bloomTransactionsIndexer.Start(eth.blockchain)
-	}
+	eth.bloomTransactionsIndexer.Start(eth.blockchain)
 
 	if config.BlobPool.Datadir != "" {
 		config.BlobPool.Datadir = stack.ResolvePath(config.BlobPool.Datadir)
