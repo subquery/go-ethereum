@@ -217,15 +217,36 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 	//     not frozen anything yet. Ensure that no blocks are missing yet from the
 	//     key-value store, since that would mean we already had an old freezer.
 
+
+	// With a sharded node, if the desired start height is set then the ancients
+	// wont start at the genesis height, so we validate based on the shard start
+	genesisHeight := uint64(0)
+	dataConfig := ReadChainDataConfig(db)
+	if dataConfig != nil && dataConfig.DesiredChainDataStart != nil {
+		genesisHeight = *dataConfig.DesiredChainDataStart
+	}
+	// The freezer might not inclue the tail, so we use the
+	// This doesn't work because the value in the freezer will be empty :(
+	if frozen, err := frdb.Ancients(); err != nil {
+		return nil, err;
+	} else if frozen > 0 && frozen < genesisHeight {
+		genesisHeight = frozen
+	}
+
 	// If the genesis hash is empty, we have a new key-value store, so nothing to
 	// validate in this method. If, however, the genesis hash is not nil, compare
 	// it to the freezer content.
-	if kvgenesis, _ := db.Get(headerHashKey(0)); len(kvgenesis) > 0 {
-		if frozen, _ := frdb.Ancients(); frozen > 0 {
+	if kvgenesis, _ := db.Get(headerHashKey(genesisHeight)); len(kvgenesis) > 0 {
+		frozen, _ := frdb.Ancients()
+		tail, _ := frdb.Tail()
+		// With sharding we check the number of items not deleted, not the total number
+		if frozen - tail > 0 {
+			tail, _ := frdb.Tail()
+			log.Info("Frozen details", "tail", tail, "frozen", frozen)
 			// If the freezer already contains something, ensure that the genesis blocks
 			// match, otherwise we might mix up freezers across chains and destroy both
 			// the freezer and the key-value store.
-			frgenesis, err := frdb.Ancient(ChainFreezerHashTable, 0)
+			frgenesis, err := frdb.Ancient(ChainFreezerHashTable, genesisHeight)
 			if err != nil {
 				printChainMetadata(db)
 				return nil, fmt.Errorf("failed to retrieve genesis from ancient %v", err)
@@ -266,11 +287,15 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 			if ReadHeadHeaderHash(db) != common.BytesToHash(kvgenesis) {
 				// Key-value store contains more data than the genesis block, make sure we
 				// didn't freeze anything yet.
-				if kvblob, _ := db.Get(headerHashKey(1)); len(kvblob) == 0 {
+				nextHeight := uint64(1)
+				if dataConfig != nil && dataConfig.DesiredChainDataStart != nil {
+					nextHeight = *dataConfig.DesiredChainDataStart + 1
+				}
+				if kvblob, _ := db.Get(headerHashKey(nextHeight)); len(kvblob) == 0 {
 					printChainMetadata(db)
 					return nil, errors.New("ancient chain segments already extracted, please set --datadir.ancient to the correct path")
 				}
-				// Block #1 is still in the database, we're allowed to init a new freezer
+				// Block #1 (Or the next shard block) is still in the database, we're allowed to init a new freezer
 			}
 			// Otherwise, the head header is still the genesis, we're allowed to init a new
 			// freezer.

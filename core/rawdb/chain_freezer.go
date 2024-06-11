@@ -19,6 +19,7 @@ package rawdb
 import (
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -118,19 +119,35 @@ func (f *chainFreezer) readFinalizedNumber(db ethdb.KeyValueReader) uint64 {
 	return *number
 }
 
+// readShardStartNumber returns the data node shard start if its set. 0 is returned
+// if the start is not set.
+func (f *chainFreezer) readShardStartNumber(db ethdb.KeyValueReader) uint64 {
+	dataConfig := ReadChainDataConfig(db)
+
+	// Threshold is above the desired chain data start, don't freeze data
+	if dataConfig == nil || dataConfig.DesiredChainDataStart == nil {
+		return 0
+	}
+	return *dataConfig.DesiredChainDataStart
+}
+
 // freezeThreshold returns the threshold for chain freezing. It's determined
 // by formula: max(finality, HEAD-params.FullImmutabilityThreshold).
 func (f *chainFreezer) freezeThreshold(db ethdb.KeyValueReader) (uint64, error) {
 	var (
-		head      = f.readHeadNumber(db)
-		final     = f.readFinalizedNumber(db)
-		headLimit uint64
+		head       = f.readHeadNumber(db)
+		final      = f.readFinalizedNumber(db)
+		shardStart = f.readShardStartNumber(db)
+		headLimit  uint64
 	)
 	if head > params.FullImmutabilityThreshold {
 		headLimit = head - params.FullImmutabilityThreshold
 	}
 	if final == 0 && headLimit == 0 {
 		return 0, errors.New("freezing threshold is not available")
+	}
+	if shardStart > headLimit {
+		headLimit = shardStart + 1
 	}
 	if final > headLimit {
 		return final, nil
@@ -189,6 +206,7 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 			log.Debug("Ancient blocks frozen already", "threshold", threshold, "frozen", frozen)
 			continue
 		}
+
 		// Seems we have data ready to be frozen, process in usable batches
 		var (
 			start = time.Now()
@@ -204,6 +222,13 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 			backoff = true
 			continue
 		}
+		// With sharding to retain consistency with the freezer we insert empty data for missing blocks, then trucate the empty blocks so genesis validation continues to work
+		// @TODO(stwiname) this could be improved by being able to advance the freezer table tail beyond the head, this would avoid freezing empty data then truncating the tail
+		dataConfig := ReadChainDataConfig(nfdb)
+		if dataConfig != nil && dataConfig.DesiredChainDataStart != nil && *dataConfig.DesiredChainDataStart > first+threshold {
+			f.TruncateTail(first + threshold)
+		}
+
 		// Batch of blocks have been frozen, flush them before wiping from key-value store
 		if err := f.Sync(); err != nil {
 			log.Crit("Failed to flush frozen tables", "err", err)
@@ -296,31 +321,42 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 func (f *chainFreezer) freezeRange(nfdb *nofreezedb, number, limit uint64) (hashes []common.Hash, err error) {
 	hashes = make([]common.Hash, 0, limit-number+1)
 
+	dataConfig := ReadChainDataConfig(nfdb)
+
 	_, err = f.ModifyAncients(func(op ethdb.AncientWriteOp) error {
 		for ; number <= limit; number++ {
+
+			// If the data is out of the shard range then we allow writing empty data, this will allow truncating the tail of the freezer later
+			outOfShard := false
+			if dataConfig != nil && dataConfig.DesiredChainDataStart != nil {
+				outOfShard = number < *dataConfig.DesiredChainDataStart
+			}
+
 			// Retrieve all the components of the canonical block.
 			hash := ReadCanonicalHash(nfdb, number)
-			if hash == (common.Hash{}) {
+			if hash == (common.Hash{}) && !outOfShard {
 				return fmt.Errorf("canonical hash missing, can't freeze block %d", number)
 			}
 			header := ReadHeaderRLP(nfdb, hash, number)
-			if len(header) == 0 {
+			if len(header) == 0 && !outOfShard {
+				log.Info("block header missing, can't freeze block", "number", number, "stack", string(debug.Stack()))
 				return fmt.Errorf("block header missing, can't freeze block %d", number)
 			}
 			body := ReadBodyRLP(nfdb, hash, number)
-			if len(body) == 0 {
+			if len(body) == 0 && !outOfShard {
 				return fmt.Errorf("block body missing, can't freeze block %d", number)
 			}
 			receipts := ReadReceiptsRLP(nfdb, hash, number)
-			if len(receipts) == 0 {
+			if len(receipts) == 0 && !outOfShard {
 				return fmt.Errorf("block receipts missing, can't freeze block %d", number)
 			}
 			td := ReadTdRLP(nfdb, hash, number)
-			if len(td) == 0 {
+			if len(td) == 0 && !outOfShard {
 				return fmt.Errorf("total difficulty missing, can't freeze block %d", number)
 			}
+			// TODO this can throw an error when rewinding to a block
 			txBloom := ReadTxBloomRLP(nfdb, hash, number)
-			if len(txBloom) == 0 {
+			if len(txBloom) == 0 && !outOfShard {
 				return fmt.Errorf("total transaction bloom, can't freeze block %d", number)
 			}
 

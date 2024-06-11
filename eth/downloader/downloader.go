@@ -139,6 +139,8 @@ type Downloader struct {
 	syncStartBlock uint64    // Head snap block when Geth was started
 	syncStartTime  time.Time // Time instance when chain sync started
 	syncLogTime    time.Time // Time instance when status was last reported
+
+	endHeight *uint64
 }
 
 // BlockChain encapsulates functions required to sync a (full or snap) blockchain.
@@ -195,6 +197,7 @@ type BlockChain interface {
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
 func New(stateDb ethdb.Database, mux *event.TypeMux, chain BlockChain, dropPeer peerDropFn, success func()) *Downloader {
+	dataConfig := rawdb.ReadChainDataConfig(stateDb)
 	dl := &Downloader{
 		stateDB:        stateDb,
 		mux:            mux,
@@ -207,6 +210,7 @@ func New(stateDb ethdb.Database, mux *event.TypeMux, chain BlockChain, dropPeer 
 		SnapSyncer:     snap.NewSyncer(stateDb, chain.TrieDB().Scheme()),
 		stateSyncStart: make(chan *stateSync),
 		syncStartBlock: chain.CurrentSnapBlock().Number.Uint64(),
+		endHeight:      dataConfig.DesiredChainDataEnd,
 	}
 	// Create the post-merge skeleton syncer and start the process
 	dl.skeleton = newSkeleton(stateDb, dl.peers, dropPeer, newBeaconBackfiller(dl, success))
@@ -1104,4 +1108,11 @@ func (d *Downloader) reportSnapSyncProgress(force bool) {
 	)
 	log.Info("Syncing: chain download in progress", "synced", progress, "chain", syncedBytes, "headers", headers, "bodies", bodies, "receipts", receipts, "eta", common.PrettyDuration(eta))
 	d.syncLogTime = time.Now()
+}
+
+func (d *Downloader) SetEndHeight(height *uint64) {
+	d.endHeight = height
+	//if height != nil && d.blockchain.CurrentHeader().Number.Uint64() >= *height {
+	//	d.queue.Reset(blockCacheMaxItems, blockCacheInitialItems)
+	//}
 }

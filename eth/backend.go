@@ -154,21 +154,21 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		networkID = chainConfig.ChainID.Uint64()
 	}
 	eth := &Ethereum{
-		config:            config,
-		chainDb:           chainDb,
-		eventMux:          stack.EventMux(),
-		accountManager:    stack.AccountManager(),
-		engine:            engine,
-		closeBloomHandler: make(chan struct{}),
-		networkID:         networkID,
-		gasPrice:          config.Miner.GasPrice,
-		bloomRequests:     make(chan chan *bloombits.Retrieval),
-		bloomIndexer:      core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
+		config:                   config,
+		chainDb:                  chainDb,
+		eventMux:                 stack.EventMux(),
+		accountManager:           stack.AccountManager(),
+		engine:                   engine,
+		closeBloomHandler:        make(chan struct{}),
+		networkID:                networkID,
+		gasPrice:                 config.Miner.GasPrice,
+		bloomRequests:            make(chan chan *bloombits.Retrieval),
+		bloomIndexer:             core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
 		bloomTransactionRequests: make(chan chan *bloombits.Retrieval),
 		bloomTransactionsIndexer: core.NewTransactionBloomIndexer(chainDb, chainConfig, params.BloomBitsBlocks, params.BloomConfirms),
-		p2pServer:         stack.Server(),
-		discmix:           enode.NewFairMix(0),
-		shutdownTracker:   shutdowncheck.NewShutdownTracker(chainDb),
+		p2pServer:                stack.Server(),
+		discmix:                  enode.NewFairMix(0),
+		shutdownTracker:          shutdowncheck.NewShutdownTracker(chainDb),
 	}
 	bcVersion := rawdb.ReadDatabaseVersion(chainDb)
 	var dbVer = "<nil>"
@@ -223,9 +223,23 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		overrides.OverrideVerkle = config.OverrideVerkle
 	}
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, config.Genesis, &overrides, eth.engine, vmConfig, &config.TransactionHistory)
+
 	if err != nil {
 		return nil, err
 	}
+
+	if config.ShardStart != nil {
+		if err := eth.blockchain.SetShardStartHeight(*config.ShardStart); err != nil {
+			return nil, err
+		}
+	}
+
+	if config.ShardEnd != nil {
+		if err := eth.blockchain.SetShardEndHeight(config.ShardEnd); err != nil {
+			return nil, err
+		}
+	}
+
 	eth.bloomIndexer.Start(eth.blockchain)
 	eth.bloomTransactionsIndexer.Start(eth.blockchain)
 
@@ -334,18 +348,18 @@ func (s *Ethereum) ResetWithGenesisBlock(gb *types.Block) {
 
 func (s *Ethereum) Miner() *miner.Miner { return s.miner }
 
-func (s *Ethereum) AccountManager() *accounts.Manager  { return s.accountManager }
-func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
-func (s *Ethereum) TxPool() *txpool.TxPool             { return s.txPool }
-func (s *Ethereum) EventMux() *event.TypeMux           { return s.eventMux }
-func (s *Ethereum) Engine() consensus.Engine           { return s.engine }
-func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
-func (s *Ethereum) IsListening() bool                  { return true } // Always listening
-func (s *Ethereum) Downloader() *downloader.Downloader { return s.handler.downloader }
-func (s *Ethereum) Synced() bool                       { return s.handler.synced.Load() }
-func (s *Ethereum) SetSynced()                         { s.handler.enableSyncedFeatures() }
-func (s *Ethereum) ArchiveMode() bool                  { return s.config.NoPruning }
-func (s *Ethereum) BloomIndexer() *core.ChainIndexer   { return s.bloomIndexer }
+func (s *Ethereum) AccountManager() *accounts.Manager           { return s.accountManager }
+func (s *Ethereum) BlockChain() *core.BlockChain                { return s.blockchain }
+func (s *Ethereum) TxPool() *txpool.TxPool                      { return s.txPool }
+func (s *Ethereum) EventMux() *event.TypeMux                    { return s.eventMux }
+func (s *Ethereum) Engine() consensus.Engine                    { return s.engine }
+func (s *Ethereum) ChainDb() ethdb.Database                     { return s.chainDb }
+func (s *Ethereum) IsListening() bool                           { return true } // Always listening
+func (s *Ethereum) Downloader() *downloader.Downloader          { return s.handler.downloader }
+func (s *Ethereum) Synced() bool                                { return s.handler.synced.Load() }
+func (s *Ethereum) SetSynced()                                  { s.handler.enableSyncedFeatures() }
+func (s *Ethereum) ArchiveMode() bool                           { return s.config.NoPruning }
+func (s *Ethereum) BloomIndexer() *core.ChainIndexer            { return s.bloomIndexer }
 func (s *Ethereum) TransactionBloomIndexer() *core.ChainIndexer { return s.bloomTransactionsIndexer }
 
 // Protocols returns all the currently configured
