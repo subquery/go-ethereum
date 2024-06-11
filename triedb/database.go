@@ -86,6 +86,8 @@ type Database struct {
 	diskdb    ethdb.Database // Persistent database to store the snapshot
 	preimages *preimageStore // The store for caching preimages
 	backend   backend        // The backend for managing trie nodes
+	// @by sq
+	tail *uint64
 }
 
 // NewDatabase initializes the trie database with default settings, note
@@ -335,4 +337,22 @@ func (db *Database) SetBufferSize(size int) error {
 // IsVerkle returns the indicator if the database is holding a verkle tree.
 func (db *Database) IsVerkle() bool {
 	return db.config.IsVerkle
+}
+// --- @sq-changes
+
+// SetTail set tail to new number, which can be used to indicate the earliest state the node has locally
+func (db *Database) SetTail(height uint64) error {
+	if db.tail != nil && *db.tail > height {
+		return errors.New("not supported")
+	}
+	db.tail = &height
+	return nil
+}
+
+// GetTail get state tail
+func (db *Database) GetTail() uint64 {
+	if db.tail == nil {
+		return 0
+	}
+	return *db.tail
 }

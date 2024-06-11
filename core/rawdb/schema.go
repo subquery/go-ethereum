@@ -37,6 +37,9 @@ var (
 	// headBlockKey tracks the latest known full block's hash.
 	headBlockKey = []byte("LastBlock")
 
+	tailHeaderKey = []byte("StartHeader")
+	tailBlockKey  = []byte("StartBlock")
+
 	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
 	headFastBlockKey = []byte("LastFast")
 
@@ -120,9 +123,10 @@ var (
 	trieNodeStoragePrefix = []byte("O") // trieNodeStoragePrefix + accountHash + hexPath -> trie node
 	stateIDPrefix         = []byte("L") // stateIDPrefix + state root -> state id
 
-	PreimagePrefix = []byte("secure-key-")       // PreimagePrefix + hash -> preimage
-	configPrefix   = []byte("ethereum-config-")  // config prefix for the db
-	genesisPrefix  = []byte("ethereum-genesis-") // genesis state prefix for the db
+	PreimagePrefix   = []byte("secure-key-")           // PreimagePrefix + hash -> preimage
+	configPrefix     = []byte("ethereum-config-")      // config prefix for the db
+	dataConfigPrefix = []byte("ethereum-data-config-") // data config prefix for the db
+	genesisPrefix    = []byte("ethereum-genesis-")     // genesis state prefix for the db
 
 	// BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
 	BloomBitsIndexPrefix            = []byte("iB")
@@ -257,6 +261,11 @@ func IsCodeKey(key []byte) (bool, []byte) {
 // configKey = configPrefix + hash
 func configKey(hash common.Hash) []byte {
 	return append(configPrefix, hash.Bytes()...)
+}
+
+// dataConfigKey = configPrefix + hash
+func dataConfigKey(hash common.Hash) []byte {
+	return append(dataConfigPrefix, hash.Bytes()...)
 }
 
 // genesisStateSpecKey = genesisPrefix + hash

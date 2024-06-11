@@ -20,6 +20,7 @@ package downloader
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common/math"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -156,6 +157,8 @@ type Downloader struct {
 	syncStartBlock uint64    // Head snap block when Geth was started
 	syncStartTime  time.Time // Time instance when chain sync started
 	syncLogTime    time.Time // Time instance when status was last reported
+
+	endHeight *uint64
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -220,6 +223,7 @@ func New(stateDb ethdb.Database, mux *event.TypeMux, chain BlockChain, lightchai
 	if lightchain == nil {
 		lightchain = chain
 	}
+	dataConfig := rawdb.ReadChainDataConfig(stateDb)
 	dl := &Downloader{
 		stateDB:        stateDb,
 		mux:            mux,
@@ -233,6 +237,7 @@ func New(stateDb ethdb.Database, mux *event.TypeMux, chain BlockChain, lightchai
 		SnapSyncer:     snap.NewSyncer(stateDb, chain.TrieDB().Scheme()),
 		stateSyncStart: make(chan *stateSync),
 		syncStartBlock: chain.CurrentSnapBlock().Number.Uint64(),
+		endHeight:      dataConfig.DesiredChainDataEnd,
 	}
 	// Create the post-merge skeleton syncer and start the process
 	dl.skeleton = newSkeleton(stateDb, dl.peers, dropPeer, newBeaconBackfiller(dl, success))
@@ -1041,7 +1046,19 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, head uint64) e
 
 		case skeleton:
 			p.log.Trace("Fetching skeleton headers", "count", MaxHeaderFetch, "from", from)
-			headers, hashes, err = d.fetchHeadersByNumber(p, from+uint64(MaxHeaderFetch)-1, MaxSkeletonSize, MaxHeaderFetch-1, false)
+			if d.endHeight != nil && *d.endHeight <= from {
+				// FIXME: immediately cancel will interrupt other fetch jobs
+				<-time.After(fsHeaderContCheck)
+				d.cancel()
+				return errCanceled
+			}
+			var size int
+			if d.endHeight == nil {
+				size = MaxSkeletonSize
+			} else {
+				size = math.Min(int(*d.endHeight-from)/MaxHeaderFetch+1, MaxSkeletonSize)
+			}
+			headers, hashes, err = d.fetchHeadersByNumber(p, from+uint64(MaxHeaderFetch)-1, size, MaxHeaderFetch-1, false)
 
 		default:
 			p.log.Trace("Fetching full headers", "count", MaxHeaderFetch, "from", from)
@@ -1842,4 +1859,11 @@ func (d *Downloader) reportSnapSyncProgress(force bool) {
 	)
 	log.Info("Syncing: chain download in progress", "synced", progress, "chain", syncedBytes, "headers", headers, "bodies", bodies, "receipts", receipts, "eta", common.PrettyDuration(eta))
 	d.syncLogTime = time.Now()
+}
+
+func (d *Downloader) SetEndHeight(height *uint64) {
+	d.endHeight = height
+	//if height != nil && d.blockchain.CurrentHeader().Number.Uint64() >= *height {
+	//	d.queue.Reset(blockCacheMaxItems, blockCacheInitialItems)
+	//}
 }

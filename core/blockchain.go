@@ -60,6 +60,9 @@ var (
 	headFinalizedBlockGauge = metrics.NewRegisteredGauge("chain/head/finalized", nil)
 	headSafeBlockGauge      = metrics.NewRegisteredGauge("chain/head/safe", nil)
 
+	tailBlockGauge  = metrics.NewRegisteredGauge("chain/tail/block", nil)
+	tailHeaderGauge = metrics.NewRegisteredGauge("chain/tail/header", nil)
+
 	chainInfoGauge = metrics.NewRegisteredGaugeInfo("chain/info", nil)
 
 	accountReadTimer   = metrics.NewRegisteredTimer("chain/account/reads", nil)
@@ -238,6 +241,7 @@ type BlockChain struct {
 	currentSnapBlock  atomic.Pointer[types.Header] // Current head of snap-sync
 	currentFinalBlock atomic.Pointer[types.Header] // Latest (consensus) finalized block
 	currentSafeBlock  atomic.Pointer[types.Header] // Latest (consensus) safe block
+	earliestBlock     atomic.Pointer[types.Header] // Earliest head of the chain
 
 	bodyCache     *lru.Cache[common.Hash, *types.Body]
 	bodyRLPCache  *lru.Cache[common.Hash, rlp.RawValue]
@@ -502,9 +506,21 @@ func (bc *BlockChain) loadLastState() error {
 		log.Warn("Head block missing, resetting chain", "hash", head)
 		return bc.Reset()
 	}
+
+	tailNumber := uint64(0)
+	if dataConfig := rawdb.ReadChainDataConfig(bc.db); dataConfig != nil && dataConfig.DesiredChainDataStart != nil {
+		tailNumber = *dataConfig.DesiredChainDataStart
+	}
+	tailBlock := bc.GetBlockByNumber(tailNumber)
+	if tailBlock == nil {
+		// Corrupt or empty database, init from scratch
+		log.Warn("Tail block missing, resetting chain", "number", tailNumber)
+		return bc.Reset()
+	}
+
 	// Everything seems to be fine, set as the head block
 	bc.currentBlock.Store(headBlock.Header())
-	headBlockGauge.Update(int64(headBlock.NumberU64()))
+	bc.earliestBlock.Store(tailBlock.Header())
 
 	// Restore the last known head header
 	headHeader := headBlock.Header()
@@ -514,6 +530,7 @@ func (bc *BlockChain) loadLastState() error {
 		}
 	}
 	bc.hc.SetCurrentHeader(headHeader)
+	bc.hc.SetEarliestHeader(tailBlock.Header())
 
 	// Restore the last known head snap block
 	bc.currentSnapBlock.Store(headBlock.Header())
@@ -768,6 +785,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 			// removed in the hc.SetHead function.
 			rawdb.DeleteBody(db, hash, num)
 			rawdb.DeleteReceipts(db, hash, num)
+			rawdb.DeleteTxBloom(db, hash, num)
 		}
 		// Todo(rjl493456442) txlookup, bloombits, etc
 	}
@@ -805,6 +823,8 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 		log.Error("SetHead invalidated finalized block")
 		bc.SetFinalized(nil)
 	}
+
+	log.Info("Rewinding blockchain complete", "target", head)
 	return rootNumber, bc.loadLastState()
 }
 
@@ -1022,7 +1042,10 @@ func (bc *BlockChain) Stop() {
 				}
 			}
 			for !bc.triegc.Empty() {
-				triedb.Dereference(bc.triegc.PopItem())
+				// @sq-change
+				root, number := bc.triegc.Pop()
+				triedb.Dereference(root)
+				triedb.SetTail(uint64(-number))
 			}
 			if _, nodes, _ := triedb.Size(); nodes != 0 { // all memory is contained within the nodes return for hashdb
 				log.Error("Dangling trie nodes after full cleanup")
@@ -1427,6 +1450,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 			break
 		}
 		bc.triedb.Dereference(root)
+		bc.triedb.SetTail(uint64(-number))
 	}
 	return nil
 }
@@ -1682,6 +1706,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	}()
 
 	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
+		// log.Info("New block", "blockNum", block.Number().Uint64())
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
 			log.Debug("Abort during block processing")
@@ -1691,6 +1716,13 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if BadHashes[block.Hash()] {
 			bc.reportBlock(block, nil, ErrBannedHash)
 			return it.index, ErrBannedHash
+		}
+
+		// TODO keep in memory
+		desiredChainEnd := rawdb.ReadChainDataConfig(bc.db).DesiredChainDataEnd
+		if desiredChainEnd != nil && block.Number().Uint64() > *desiredChainEnd {
+			log.Info("Block after data end, skipping")
+			continue
 		}
 		// If the block is known (in the middle of the chain), it's a special case for
 		// Clique blocks where they can share state among each other, so importing an
@@ -2460,4 +2492,114 @@ func (bc *BlockChain) SetTrieFlushInterval(interval time.Duration) {
 // GetTrieFlushInterval gets the in-memory tries flushAlloc interval
 func (bc *BlockChain) GetTrieFlushInterval() time.Duration {
 	return time.Duration(bc.flushInterval.Load())
+}
+
+// ----- @sq changed
+func (bc *BlockChain) truncateStateTail(newTail uint64) error {
+	currentTail := bc.triedb.GetTail()
+	if newTail <= currentTail {
+		return nil
+	}
+	for height := currentTail; height < newTail; height++ {
+		header := bc.GetHeaderByNumber(height)
+		// This isn't right,.height cant be used as a priority
+		bc.triegc.Push(header.Root, -int64(height))
+	}
+	// TODO: need to enforce trie truncate on local disk
+	return nil
+}
+
+func (bc *BlockChain) SetTail(height uint64) error {
+	delFn := func(db ethdb.KeyValueWriter, hash common.Hash, num uint64) {
+		frozen, _ := bc.db.Ancients()
+
+		if num+1 <= frozen {
+			// Headerchain should clear out all relevant ancients data
+			log.Crit("delFn called on frozen data")
+		} else {
+			// Remove body and receipts from the active store, remainder will be cleared in the hc.SetTail
+			rawdb.DeleteBody(db, hash, num)
+			rawdb.DeleteReceipts(db, hash, num)
+			rawdb.DeleteTxBloom(db, hash, num)
+		}
+		// Todo(stwiname) from equivalent in SetHead.delFn
+		// Todo(rjl493456442) txlookup, bloombits, etc
+	}
+
+	if err := bc.hc.SetTail(height, delFn); err != nil {
+		return err
+	}
+
+	// TODO delete relevant state
+	// bc.triedb.TruncateTail(num)
+
+	// Clear out any stale content from the caches
+	bc.bodyCache.Purge()
+	bc.bodyRLPCache.Purge()
+	bc.receiptsCache.Purge()
+	bc.blockCache.Purge()
+	bc.txLookupCache.Purge()
+
+	return nil
+}
+
+func (bc *BlockChain) SetShardStartHeight(height uint64) error {
+	config := rawdb.ReadChainDataConfig(bc.db)
+
+	if config.DesiredChainDataEnd != nil && *config.DesiredChainDataEnd <= height {
+		return fmt.Errorf("Start height cannot be after end height")
+	}
+
+	if config.DesiredChainDataStart != nil && *config.DesiredChainDataStart > height {
+		return fmt.Errorf("Start height cannot be decreased, there is no way to recover state")
+	}
+
+	if err := bc.SetTail(height); err != nil {
+		return err
+	}
+
+	// TODO perisisting this should happen with batch in SetTail
+	config.DesiredChainDataStart = &height
+	rawdb.WriteChainDataConfig(bc.db, config)
+
+	return nil
+}
+
+func (bc *BlockChain) SetShardEndHeight(height *uint64) error {
+	config := rawdb.ReadChainDataConfig(bc.db)
+
+	if config.DesiredChainDataStart != nil && *config.DesiredChainDataStart >= *height {
+		return fmt.Errorf("End height cannot be before start height")
+	}
+
+	if height != nil && bc.CurrentHeader().Number.Uint64() > *height {
+		// rollback
+		if err := bc.SetHead(*height); err != nil {
+			return err
+		}
+
+		// TODO truncate state
+
+
+		// type freezer interface {
+		// 	Freeze(threshold uint64) error
+		// }
+		// err = api.eth.chainDb.(freezer).Freeze(0)
+		// if err != nil {
+		// 	return false, err
+		// }
+		// TODO truncate state head
+		// err = api.eth.blockchain.TrieDB().SetHead(*height)
+		// if err != nil {
+		// 	return false, err
+		// }
+
+		// TODO call blockchain.Stop()?
+	}
+	// else blockchain.go will limit this once the desired height is reached
+
+	config.DesiredChainDataEnd = height
+	rawdb.WriteChainDataConfig(bc.db, config)
+
+	return nil
 }

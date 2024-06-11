@@ -218,15 +218,26 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.OverrideVerkle != nil {
 		overrides.OverrideVerkle = config.OverrideVerkle
 	}
+
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, config.Genesis, &overrides, eth.engine, vmConfig, eth.shouldPreserve, &config.TransactionHistory)
 	if err != nil {
 		return nil, err
 	}
-	eth.bloomIndexer.Start(eth.blockchain)
 
-	if eth.ArchiveMode() {
-		eth.bloomTransactionsIndexer.Start(eth.blockchain)
+	if config.ShardStart != nil {
+		if err := eth.blockchain.SetShardStartHeight(*config.ShardStart); err != nil {
+			return nil, err
+		}
 	}
+
+	if config.ShardEnd != nil {
+		if err := eth.blockchain.SetShardEndHeight(config.ShardEnd); err != nil {
+			return nil, err
+		}
+	}
+
+	eth.bloomIndexer.Start(eth.blockchain)
+	eth.bloomTransactionsIndexer.Start(eth.blockchain)
 
 	if config.BlobPool.Datadir != "" {
 		config.BlobPool.Datadir = stack.ResolvePath(config.BlobPool.Datadir)

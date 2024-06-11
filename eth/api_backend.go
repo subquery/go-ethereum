@@ -91,6 +91,10 @@ func (b *EthAPIBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumb
 		}
 		return block, nil
 	}
+	if number == rpc.EarliestBlockNumber {
+		earliestNumber := b.eth.blockchain.HeaderChain().EarliestHeight()
+		return b.eth.blockchain.GetHeaderByNumber(earliestNumber), nil
+	}
 	return b.eth.blockchain.GetHeaderByNumber(uint64(number)), nil
 }
 
@@ -142,6 +146,10 @@ func (b *EthAPIBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumbe
 			return nil, errors.New("safe block not found")
 		}
 		return b.eth.blockchain.GetBlock(header.Hash(), header.Number.Uint64()), nil
+	}
+	if number == rpc.EarliestBlockNumber {
+		earliestNumber := b.eth.blockchain.HeaderChain().EarliestHeight()
+		return b.eth.blockchain.GetBlockByNumber(earliestNumber), nil
 	}
 	return b.eth.blockchain.GetBlockByNumber(uint64(number)), nil
 }
@@ -419,6 +427,10 @@ func (b *EthAPIBackend) Engine() consensus.Engine {
 
 func (b *EthAPIBackend) CurrentHeader() *types.Header {
 	return b.eth.blockchain.CurrentHeader()
+}
+
+func (b *EthAPIBackend) EarliestHeader() *types.Header {
+	return b.eth.blockchain.EarliestBlock()
 }
 
 func (b *EthAPIBackend) Miner() *miner.Miner {
