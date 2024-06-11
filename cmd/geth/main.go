@@ -156,6 +156,12 @@ var (
 		utils.BeaconGenesisRootFlag,
 		utils.BeaconGenesisTimeFlag,
 		utils.BeaconCheckpointFlag,
+<<<<<<< HEAD
+=======
+		utils.CollectWitnessFlag,
+		utils.ShardStartFlag,
+		utils.ShardEndFlag,
+>>>>>>> f63744f0c (Implement sharding)
 	}, utils.NetworkFlags, utils.DatabaseFlags)
 
 	rpcFlags = []cli.Flag{

@@ -951,6 +951,17 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Value:    metrics.DefaultConfig.InfluxDBOrganization,
 		Category: flags.MetricsCategory,
 	}
+
+	ShardStartFlag = &cli.Uint64Flag{
+		Name: "shardstart",
+		Usage: "ShardStart the block height of Shard start",
+		Category: flags.StateCategory,
+	}
+	ShardEndFlag = &cli.Uint64Flag{
+		Name: "shardend",
+		Usage: "ShardEnd the block height of Shard end (0 means no end)",
+		Category: flags.StateCategory,
+	}
 )
 
 var (
@@ -1785,6 +1796,25 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		} else {
 			cfg.EthDiscoveryURLs = SplitAndTrim(urls)
 		}
+	}
+
+	if ctx.IsSet(ShardStartFlag.Name) {
+		start := ctx.Uint64(ShardStartFlag.Name)
+		cfg.ShardStart = &start
+	}
+	if cfg.ShardStart != nil {
+		log.Info("Set shard start", "ShardStart", *cfg.ShardStart)
+	} else {
+		log.Info("Shard start disabled")
+	}
+	if ctx.IsSet(ShardEndFlag.Name) {
+		end := ctx.Uint64(ShardEndFlag.Name)
+		cfg.ShardEnd = &end
+	}
+	if cfg.ShardEnd != nil {
+		log.Info("Set shard end", "shardend", *cfg.ShardEnd)
+	} else {
+		log.Info("Shard end disabled")
 	}
 	// Override any default configs for hard coded networks.
 	switch {

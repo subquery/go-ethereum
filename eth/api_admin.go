@@ -24,6 +24,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/params"
+
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -140,4 +143,95 @@ func (api *AdminAPI) ImportChain(file string) (bool, error) {
 		blocks = blocks[:0]
 	}
 	return true, nil
+}
+
+func (api *AdminAPI) StopSync() (bool, error) {
+	return true, nil
+}
+
+// FIXME: uint64(number) hexutil.Uint64
+func (api *AdminAPI) SetEndHeight(height *uint64) (bool, error) {
+	if err := api.eth.blockchain.SetShardEndHeight(height); err != nil {
+		return false, err
+	}
+
+	// TODO can this be moved?
+	api.eth.Downloader().SetEndHeight(height)
+
+	return true, nil;
+}
+
+func (api *AdminAPI) SetStartHeight(height *uint64) (bool, error) {
+	if err := api.eth.blockchain.SetShardStartHeight(*height); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (api *AdminAPI) GetDataConfig() (*params.ChainDataStatus, error) {
+	blockchain := api.eth.blockchain
+	latestHeight := blockchain.CurrentHeader().Number.Uint64()
+	earliestHeight := blockchain.EarliestBlock().Number.Uint64()
+	ancients, err := api.eth.chainDb.Ancients()
+	if err != nil {
+		return nil, err
+	}
+	ancientHead := ancients - 1
+	stateTail := api.eth.blockchain.TrieDB().GetTail()
+	status := &params.ChainDataStatus{
+		LatestHeight:     &latestHeight,
+		ChainDataStart:   &earliestHeight,
+		AncientEndHeight: &ancientHead,
+		ChainStateStart:  &stateTail,
+	}
+
+	return status, nil
+}
+
+func (api *AdminAPI) GetDesiredConfig() (*params.ChainDataConfig, error) {
+	config := rawdb.ReadChainDataConfig(api.eth.chainDb)
+
+	return config, nil
+}
+
+func (api *AdminAPI) CheckState(height uint64) (bool, error) {
+	header := api.eth.blockchain.GetHeaderByNumber(height)
+	return api.eth.blockchain.HasState(header.Root), nil
+}
+
+// Performs a binary search on the state db to find the first height there is state
+func (api *AdminAPI) StateStartHeight() (*uint64, error) {
+	// Get the current block number
+	currentBlock := api.eth.blockchain.CurrentBlock()
+	earliestBlock := api.eth.blockchain.EarliestBlock()
+
+	if currentBlock == nil {
+		return nil, fmt.Errorf("Unable to resolve state root, current block not found")
+	}
+
+	// Binary search to find the earliest block with state data
+	startBlock := earliestBlock.Number.Uint64()
+	low := earliestBlock.Number.Uint64()
+	high := currentBlock.Number.Uint64()
+
+	for low <= high {
+		mid := (low + high) / 2
+		block := api.eth.blockchain.GetBlockByNumber(mid)
+		if block == nil {
+			return nil, fmt.Errorf("Unable to resolve state root, block (%d) not found", mid)
+		}
+
+		_, err := api.eth.blockchain.StateAt(block.Root())
+		if err == nil {
+			startBlock = mid
+			if (mid == 0) {
+				break
+			}
+			high = mid - 1 // Look for an earlier block
+		} else {
+			low = mid + 1 // Look for a later block
+		}
+	}
+
+	return &startBlock, nil
 }

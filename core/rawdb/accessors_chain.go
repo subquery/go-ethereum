@@ -963,7 +963,6 @@ func ReadHeadBlock(db ethdb.Reader) *types.Block {
 	return ReadBlock(db, headBlockHash, *headBlockNumber)
 }
 
-
 // HasTxBloom verifies the existence of the transaction bloom belonging
 // to a block.
 func HasTxBloom(db ethdb.Reader, hash common.Hash, number uint64) bool {
@@ -1032,4 +1031,3 @@ func DeleteTxBloom(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
 		log.Crit("Failed to delete block transaction bloom", "err", err)
 	}
 }
-
