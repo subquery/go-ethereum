@@ -187,3 +187,31 @@ func WriteTransitionStatus(db ethdb.KeyValueWriter, data []byte) {
 		log.Crit("Failed to store the eth2 transition status", "err", err)
 	}
 }
+
+// ReadChainDataConfig retrieves the data node settings based on the given genesis hash.
+func ReadChainDataConfig(db ethdb.KeyValueReader) *params.ChainDataConfig {
+	data, _ := db.Get(dataConfigKey(common.Hash{}))
+	if len(data) == 0 {
+		return &params.ChainDataConfig{}
+	}
+	var config params.ChainDataConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		log.Error("Invalid chain data config JSON", "err", err)
+		return nil
+	}
+	return &config
+}
+
+// WriteChainDataConfig writes the chain data config settings to the database.
+func WriteChainDataConfig(db ethdb.KeyValueWriter, cfg *params.ChainDataConfig) {
+	if cfg == nil {
+		return
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		log.Crit("Failed to JSON encode chain data config", "err", err)
+	}
+	if err := db.Put(dataConfigKey(common.Hash{}), data); err != nil {
+		log.Crit("Failed to store chain data config", "err", err)
+	}
+}

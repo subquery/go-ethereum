@@ -91,3 +91,17 @@ func SafeMul(x, y uint64) (uint64, bool) {
 	hi, lo := bits.Mul64(x, y)
 	return lo, hi != 0
 }
+
+func Min(x int, y int) int {
+	if x <= y {
+		return x
+	}
+	return y
+}
+
+func Max(x int, y int) int {
+	if x >= y {
+		return x
+	}
+	return y
+}

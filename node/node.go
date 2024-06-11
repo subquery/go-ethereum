@@ -789,6 +789,13 @@ func (db *closeTrackingDB) Close() error {
 	return db.Database.Close()
 }
 
+func (db *closeTrackingDB) Freeze(threshold uint64) error {
+	type freezer interface {
+		Freeze(threshold uint64) error
+	}
+	return db.Database.(freezer).Freeze(threshold)
+}
+
 // wrapDatabase ensures the database will be auto-closed when Node is closed.
 func (n *Node) wrapDatabase(db ethdb.Database) ethdb.Database {
 	wrapper := &closeTrackingDB{db, n}

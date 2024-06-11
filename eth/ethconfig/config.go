@@ -153,6 +153,10 @@ type Config struct {
 
 	// OverrideVerkle (TODO: remove after the fork)
 	OverrideVerkle *uint64 `toml:",omitempty"`
+
+	// The Data Node Sharding Range
+	ShardStart *uint64
+	ShardEnd   *uint64 // 0 value means no limit on end
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.
