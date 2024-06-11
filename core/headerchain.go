@@ -61,8 +61,10 @@ type HeaderChain struct {
 	chainDb       ethdb.Database
 	genesisHeader *types.Header
 
-	currentHeader     atomic.Pointer[types.Header] // Current head of the header chain (maybe above the block chain!)
-	currentHeaderHash common.Hash                  // Hash of the current head of the header chain (prevent recomputing all the time)
+	currentHeader      atomic.Pointer[types.Header] // Current head of the header chain (may be above the block chain!)
+	currentHeaderHash  common.Hash  // Hash of the current head of the header chain (prevent recomputing all the time)
+	earliestHeader     atomic.Pointer[types.Header] // Earliest head of the header chain (may be above the block chain!)
+	earliestHeaderHash common.Hash  // Hash of the earliest head of the header chain (prevent recomputing all the time)
 
 	headerCache *lru.Cache[common.Hash, *types.Header]
 	tdCache     *lru.Cache[common.Hash, *big.Int] // most recent total difficulties
@@ -95,7 +97,35 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 		}
 	}
 	hc.currentHeaderHash = hc.CurrentHeader().Hash()
+
+	if dataConfig := rawdb.ReadChainDataConfig(chainDb); dataConfig != nil {
+		if dataConfig.DesiredChainDataStart != nil {
+			if shead := hc.GetHeaderByNumber(*dataConfig.DesiredChainDataStart); shead != nil {
+				hc.earliestHeader.Store(shead)
+				hc.earliestHeaderHash = shead.Hash()
+
+			} else {
+				return nil, fmt.Errorf("Failed to get header for earliest height %d", *dataConfig.DesiredChainDataStart)
+			}
+		} else {
+			shead := hc.GetHeaderByNumber(0)
+			hc.earliestHeader.Store(shead)
+			hc.earliestHeaderHash = shead.Hash()
+		}
+		if dataConfig.DesiredChainDataEnd != nil {
+			// TODO this could be in the futrue and should throw
+			if chead := hc.GetHeaderByNumber(*dataConfig.DesiredChainDataEnd); chead != nil {
+				hc.currentHeader.Store(chead)
+				hc.currentHeaderHash = chead.Hash()
+			} else {
+				// TODO should this throw?
+				return nil, fmt.Errorf("Failed to get header for current height %d", *dataConfig.DesiredChainDataEnd)
+			}
+		}
+	}
+
 	headHeaderGauge.Update(hc.CurrentHeader().Number.Int64())
+	tailHeaderGauge.Update(hc.EarliestHeader().Number.Int64())
 	return hc, nil
 }
 
@@ -520,6 +550,20 @@ func (hc *HeaderChain) SetCurrentHeader(head *types.Header) {
 	headHeaderGauge.Update(head.Number.Int64())
 }
 
+func (hc *HeaderChain) SetEarliestHeader(head *types.Header) {
+	hc.earliestHeader.Store(head)
+	hc.earliestHeaderHash = head.Hash()
+	tailHeaderGauge.Update(head.Number.Int64())
+}
+
+func (hc *HeaderChain) EarliestHeader() *types.Header {
+	return hc.earliestHeader.Load()
+}
+
+func (hc *HeaderChain) EarliestHeight() uint64 {
+	return hc.EarliestHeader().Number.Uint64()
+}
+
 type (
 	// UpdateHeadBlocksCallback is a callback function that is called by SetHead
 	// before head header is updated. The method will return the actual block it
@@ -660,3 +704,71 @@ func (hc *HeaderChain) Engine() consensus.Engine { return hc.engine }
 func (hc *HeaderChain) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return nil
 }
+
+// setTail removes local chain before the new tail block
+// Everything before this block will be deleted
+func (hc *HeaderChain) SetTail(tail uint64, delFn DeleteBlockContentCallback) error {
+	log.Info("Setting chain tail", "height", tail)
+
+	if tail > hc.CurrentHeader().Number.Uint64() {
+		return fmt.Errorf("Unable to set tail (%v), greater than current head (%v)", tail, hc.CurrentHeader().Number.Uint64())
+	}
+
+	tailHeader := hc.GetHeaderByNumber(tail)
+	if tailHeader == nil {
+		return fmt.Errorf("Unable to find header for tail %v.", tail)
+	}
+
+	batch := hc.chainDb.NewBatch()
+
+	// TODO handle any pending ancients data
+	frozen, err := hc.chainDb.Ancients()
+	if err != nil {
+		return err
+	}
+
+	// Work backwards removing data, tail is inclusive so we start removal before the tail
+	// We need to retain the genesis block
+	for hdr := hc.GetHeader(tailHeader.ParentHash, tail-1); hdr != nil && hdr.Number.Uint64() > 0; hdr = hc.GetHeader(hdr.ParentHash, hdr.Number.Uint64() - 1) {
+		num := hdr.Number.Uint64()
+
+		// If we reach frozen data we can clear everything below the height in one go
+		if num <= frozen {
+			log.Info("Reached frozen data, truncating tail", "height", num)
+			_, err := hc.chainDb.TruncateTail(num)
+			if err != nil {
+				return err
+			}
+			break;
+		}
+
+		// Gather all the side fork hashes
+		hashes := rawdb.ReadAllHashes(hc.chainDb, num)
+		if len(hashes) == 0 {
+			// No hashes in the database whatsoever, probably frozen already
+			hashes = append(hashes, hdr.Hash())
+		}
+		for _, hash := range hashes {
+			delFn(batch, hash, num)
+			rawdb.DeleteHeader(batch, hash, num)
+			rawdb.DeleteTd(batch, hash, num)
+		}
+
+		// TODO does this need to happen?
+		// rawdb.DeleteCnonicalHash(batch, num)
+	}
+
+	// Flush all accumulated deletions.
+	if err := batch.Write(); err != nil {
+		log.Crit("Failed to set tail", "error", err)
+	}
+	// Clear out any stale content from the caches
+	hc.headerCache.Purge()
+	hc.tdCache.Purge()
+	hc.numberCache.Purge()
+
+	hc.SetEarliestHeader(tailHeader)
+
+	return nil
+}
+

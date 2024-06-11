@@ -245,7 +245,6 @@ func (f *Freezer) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (writeSize
 	}
 	f.writeLock.Lock()
 	defer f.writeLock.Unlock()
-
 	// Roll back all tables to the starting position in case of error.
 	prevItem := f.frozen.Load()
 	defer func() {

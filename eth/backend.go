@@ -222,6 +222,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.OverrideVerkle != nil {
 		overrides.OverrideVerkle = config.OverrideVerkle
 	}
+
 	// TODO (MariusVanDerWijden) get rid of shouldPreserve in a follow-up PR
 	shouldPreserve := func(header *types.Header) bool {
 		return false
@@ -230,6 +231,19 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if config.ShardStart != nil {
+		if err := eth.blockchain.SetShardStartHeight(*config.ShardStart); err != nil {
+			return nil, err
+		}
+	}
+
+	if config.ShardEnd != nil {
+		if err := eth.blockchain.SetShardEndHeight(config.ShardEnd); err != nil {
+			return nil, err
+		}
+	}
+
 	eth.bloomIndexer.Start(eth.blockchain)
 	eth.bloomTransactionsIndexer.Start(eth.blockchain)
 
