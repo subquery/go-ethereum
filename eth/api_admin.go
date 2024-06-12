@@ -158,7 +158,7 @@ func (api *AdminAPI) SetEndHeight(height *uint64) (bool, error) {
 	// TODO can this be moved?
 	api.eth.Downloader().SetEndHeight(height)
 
-	return true, nil;
+	return true, nil
 }
 
 func (api *AdminAPI) SetStartHeight(height *uint64) (bool, error) {
@@ -224,7 +224,7 @@ func (api *AdminAPI) StateStartHeight() (*uint64, error) {
 		_, err := api.eth.blockchain.StateAt(block.Root())
 		if err == nil {
 			startBlock = mid
-			if (mid == 0) {
+			if mid == 0 {
 				break
 			}
 			high = mid - 1 // Look for an earlier block

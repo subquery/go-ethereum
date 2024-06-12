@@ -2609,9 +2609,6 @@ func (bc *BlockChain) SetTail(height uint64) error {
 		return err
 	}
 
-	// TODO delete relevant state
-	// bc.triedb.TruncateTail(num)
-
 	// Clear out any stale content from the caches
 	bc.bodyCache.Purge()
 	bc.bodyRLPCache.Purge()
@@ -2637,7 +2634,7 @@ func (bc *BlockChain) SetShardStartHeight(height uint64) error {
 		return err
 	}
 
-	// TODO perisisting this should happen with batch in SetTail
+	// TODO(stwiname) perisisting this should happen with batch in SetTail
 	config.DesiredChainDataStart = &height
 	rawdb.WriteChainDataConfig(bc.db, config)
 
@@ -2656,24 +2653,6 @@ func (bc *BlockChain) SetShardEndHeight(height *uint64) error {
 		if err := bc.SetHead(*height); err != nil {
 			return err
 		}
-
-		// TODO truncate state
-
-
-		// type freezer interface {
-		// 	Freeze(threshold uint64) error
-		// }
-		// err = api.eth.chainDb.(freezer).Freeze(0)
-		// if err != nil {
-		// 	return false, err
-		// }
-		// TODO truncate state head
-		// err = api.eth.blockchain.TrieDB().SetHead(*height)
-		// if err != nil {
-		// 	return false, err
-		// }
-
-		// TODO call blockchain.Stop()?
 	}
 	// else blockchain.go will limit this once the desired height is reached
 
