@@ -440,7 +440,6 @@ func (b *EthAPIBackend) StateAtTransaction(ctx context.Context, block *types.Blo
 	return b.eth.stateAtTransaction(ctx, block, txIndex, reexec)
 }
 
-
 func (b *EthAPIBackend) GetTxBloom(ctx context.Context, hash common.Hash) types.Bloom {
 	raw := b.eth.blockchain.GetTxBloom(hash)
 	return types.BytesToBloom(*raw)
