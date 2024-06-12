@@ -329,6 +329,7 @@ func (db *Database) SetBufferSize(size int) error {
 func (db *Database) IsVerkle() bool {
 	return db.config.IsVerkle
 }
+
 // --- @sq-changes
 
 // SetTail set tail to new number, which can be used to indicate the earliest state the node has locally

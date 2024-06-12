@@ -1,9 +1,8 @@
 package params
 
 type ChainDataConfig struct {
-	DesiredChainDataStart  *uint64 `json:"desiredChainDataStart"`
-	DesiredChainDataEnd    *uint64 `json:"desiredChainDataEnd"`
-	DesiredChainStateStart *uint64 `json:"desiredChainStateStart"`
+	DesiredChainDataStart *uint64 `json:"desiredChainDataStart"`
+	DesiredChainDataEnd   *uint64 `json:"desiredChainDataEnd"`
 }
 
 type ChainDataStatus struct {

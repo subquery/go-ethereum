@@ -154,20 +154,20 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		networkID = chainConfig.ChainID.Uint64()
 	}
 	eth := &Ethereum{
-		config:            config,
-		chainDb:           chainDb,
-		eventMux:          stack.EventMux(),
-		accountManager:    stack.AccountManager(),
-		engine:            engine,
-		closeBloomHandler: make(chan struct{}),
-		networkID:         networkID,
-		gasPrice:          config.Miner.GasPrice,
-		bloomRequests:     make(chan chan *bloombits.Retrieval),
-		bloomIndexer:      core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
+		config:                   config,
+		chainDb:                  chainDb,
+		eventMux:                 stack.EventMux(),
+		accountManager:           stack.AccountManager(),
+		engine:                   engine,
+		closeBloomHandler:        make(chan struct{}),
+		networkID:                networkID,
+		gasPrice:                 config.Miner.GasPrice,
+		bloomRequests:            make(chan chan *bloombits.Retrieval),
+		bloomIndexer:             core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
 		bloomTransactionRequests: make(chan chan *bloombits.Retrieval),
 		bloomTransactionsIndexer: core.NewTransactionBloomIndexer(chainDb, chainConfig, params.BloomBitsBlocks, params.BloomConfirms),
-		p2pServer:         stack.Server(),
-		shutdownTracker:   shutdowncheck.NewShutdownTracker(chainDb),
+		p2pServer:                stack.Server(),
+		shutdownTracker:          shutdowncheck.NewShutdownTracker(chainDb),
 	}
 	bcVersion := rawdb.ReadDatabaseVersion(chainDb)
 	var dbVer = "<nil>"
@@ -363,18 +363,18 @@ func (s *Ethereum) ResetWithGenesisBlock(gb *types.Block) {
 
 func (s *Ethereum) Miner() *miner.Miner { return s.miner }
 
-func (s *Ethereum) AccountManager() *accounts.Manager  { return s.accountManager }
-func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
-func (s *Ethereum) TxPool() *txpool.TxPool             { return s.txPool }
-func (s *Ethereum) EventMux() *event.TypeMux           { return s.eventMux }
-func (s *Ethereum) Engine() consensus.Engine           { return s.engine }
-func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
-func (s *Ethereum) IsListening() bool                  { return true } // Always listening
-func (s *Ethereum) Downloader() *downloader.Downloader { return s.handler.downloader }
-func (s *Ethereum) Synced() bool                       { return s.handler.synced.Load() }
-func (s *Ethereum) SetSynced()                         { s.handler.enableSyncedFeatures() }
-func (s *Ethereum) ArchiveMode() bool                  { return s.config.NoPruning }
-func (s *Ethereum) BloomIndexer() *core.ChainIndexer   { return s.bloomIndexer }
+func (s *Ethereum) AccountManager() *accounts.Manager           { return s.accountManager }
+func (s *Ethereum) BlockChain() *core.BlockChain                { return s.blockchain }
+func (s *Ethereum) TxPool() *txpool.TxPool                      { return s.txPool }
+func (s *Ethereum) EventMux() *event.TypeMux                    { return s.eventMux }
+func (s *Ethereum) Engine() consensus.Engine                    { return s.engine }
+func (s *Ethereum) ChainDb() ethdb.Database                     { return s.chainDb }
+func (s *Ethereum) IsListening() bool                           { return true } // Always listening
+func (s *Ethereum) Downloader() *downloader.Downloader          { return s.handler.downloader }
+func (s *Ethereum) Synced() bool                                { return s.handler.synced.Load() }
+func (s *Ethereum) SetSynced()                                  { s.handler.enableSyncedFeatures() }
+func (s *Ethereum) ArchiveMode() bool                           { return s.config.NoPruning }
+func (s *Ethereum) BloomIndexer() *core.ChainIndexer            { return s.bloomIndexer }
 func (s *Ethereum) TransactionBloomIndexer() *core.ChainIndexer { return s.bloomTransactionsIndexer }
 
 // Protocols returns all the currently configured
