@@ -62,9 +62,9 @@ type HeaderChain struct {
 	genesisHeader *types.Header
 
 	currentHeader      atomic.Pointer[types.Header] // Current head of the header chain (may be above the block chain!)
-	currentHeaderHash  common.Hash  // Hash of the current head of the header chain (prevent recomputing all the time)
+	currentHeaderHash  common.Hash                  // Hash of the current head of the header chain (prevent recomputing all the time)
 	earliestHeader     atomic.Pointer[types.Header] // Earliest head of the header chain (may be above the block chain!)
-	earliestHeaderHash common.Hash  // Hash of the earliest head of the header chain (prevent recomputing all the time)
+	earliestHeaderHash common.Hash                  // Hash of the earliest head of the header chain (prevent recomputing all the time)
 
 	headerCache *lru.Cache[common.Hash, *types.Header]
 	tdCache     *lru.Cache[common.Hash, *big.Int] // most recent total difficulties
@@ -113,13 +113,9 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 			hc.earliestHeaderHash = shead.Hash()
 		}
 		if dataConfig.DesiredChainDataEnd != nil {
-			// TODO this could be in the futrue and should throw
 			if chead := hc.GetHeaderByNumber(*dataConfig.DesiredChainDataEnd); chead != nil {
 				hc.currentHeader.Store(chead)
 				hc.currentHeaderHash = chead.Hash()
-			} else {
-				// TODO should this throw?
-				return nil, fmt.Errorf("Failed to get header for current height %d", *dataConfig.DesiredChainDataEnd)
 			}
 		}
 	}
@@ -712,7 +708,6 @@ func (hc *HeaderChain) SetTail(tail uint64, delFn DeleteBlockContentCallback) er
 
 	batch := hc.chainDb.NewBatch()
 
-	// TODO handle any pending ancients data
 	frozen, err := hc.chainDb.Ancients()
 	if err != nil {
 		return err
@@ -720,7 +715,7 @@ func (hc *HeaderChain) SetTail(tail uint64, delFn DeleteBlockContentCallback) er
 
 	// Work backwards removing data, tail is inclusive so we start removal before the tail
 	// We need to retain the genesis block
-	for hdr := hc.GetHeader(tailHeader.ParentHash, tail-1); hdr != nil && hdr.Number.Uint64() > 0; hdr = hc.GetHeader(hdr.ParentHash, hdr.Number.Uint64() - 1) {
+	for hdr := hc.GetHeader(tailHeader.ParentHash, tail-1); hdr != nil && hdr.Number.Uint64() > 0; hdr = hc.GetHeader(hdr.ParentHash, hdr.Number.Uint64()-1) {
 		num := hdr.Number.Uint64()
 
 		// If we reach frozen data we can clear everything below the height in one go
@@ -730,7 +725,7 @@ func (hc *HeaderChain) SetTail(tail uint64, delFn DeleteBlockContentCallback) er
 			if err != nil {
 				return err
 			}
-			break;
+			break
 		}
 
 		// Gather all the side fork hashes
@@ -762,4 +757,3 @@ func (hc *HeaderChain) SetTail(tail uint64, delFn DeleteBlockContentCallback) er
 
 	return nil
 }
-
