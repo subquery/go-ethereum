@@ -7,7 +7,7 @@
 Many other networks and L2s use forks of geth we can apply the changes to these forks using the following steps
 
 1. Generate a patch between the feature branch and master
-`git format-patch --stdout master > subql.patch`
+`git format-patch --stdout <sha1>..<sha2> > subql.patch`
 
 2. In the for repo ensure that the subquery geth for is a remote
 
@@ -31,4 +31,3 @@ It's suggested to create a patch or patches of these changes to make it easier t
 You can do this by repeating steps 1, 3
 
 e.g `git format-patch --stdout 2d772be398d851a62be53d1b0c162c45bb4876e3..c9760f18c15b8d36af7ef1a9bf5b21056f633b71 > build_fixes.patch`
-
