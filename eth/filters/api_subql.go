@@ -3,16 +3,18 @@ package filters
 import (
 	"context"
 	"encoding/json"
+	"math"
+	"math/big"
+	"sort"
+
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
-	"math"
-	"math/big"
-	"sort"
 )
 
 type BlockResult struct {
@@ -57,6 +59,11 @@ type EntityFilter map[string][]FieldFilter
 type SubqlAPI struct {
 	sys     *FilterSystem
 	backend ethapi.Backend
+}
+
+type DataInfo struct {
+	StartBlock  int `json:"startBlock"`
+	EndBlock    int `json:"endBlock"`
 }
 
 type Capability struct {
@@ -114,6 +121,25 @@ func NewSubqlApi(sys *FilterSystem, backend ethapi.Backend) *SubqlAPI {
 	}
 
 	return api
+}
+
+func (api *SubqlAPI) DataInfo(ctx context.Context) (*DataInfo, error) {
+	config := rawdb.ReadChainDataConfig(api.backend.ChainDb())
+
+	start := 0
+	if config.DesiredChainDataStart != nil {
+		start = int(*config.DesiredChainDataStart)
+	}
+
+	end := 0
+	if config.DesiredChainDataEnd != nil {
+		end = int(*config.DesiredChainDataEnd)
+	}
+
+	return &DataInfo{
+		StartBlock: start,
+		EndBlock: end,
+	}, nil
 }
 
 func (api *SubqlAPI) FilterBlocksCapabilities(ctx context.Context) (*Capability, error) {
