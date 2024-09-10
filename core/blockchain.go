@@ -2648,7 +2648,15 @@ func (bc *BlockChain) SetShardEndHeight(height *uint64) error {
 		return fmt.Errorf("End height cannot be before start height")
 	}
 
-	if height != nil && bc.CurrentHeader().Number.Uint64() > *height {
+	currentHeight := bc.CurrentHeader().Number.Uint64()
+
+	if height != nil && currentHeight > *height {
+
+		// Check that if its not an archive node and that the height is still within state range.
+		// TrieDirtyDisabled is set to true for archive nodes.
+		if !bc.cacheConfig.TrieDirtyDisabled && currentHeight > bc.cacheConfig.StateHistory && *height < currentHeight - bc.cacheConfig.StateHistory {
+			return errors.New("Cannot set height before chain state.")
+		}
 		// rollback
 		if err := bc.SetHead(*height); err != nil {
 			return err
