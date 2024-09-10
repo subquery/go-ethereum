@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -59,11 +60,6 @@ type EntityFilter map[string][]FieldFilter
 type SubqlAPI struct {
 	sys     *FilterSystem
 	backend ethapi.Backend
-}
-
-type DataInfo struct {
-	StartBlock  int `json:"startBlock"`
-	EndBlock    int `json:"endBlock"`
 }
 
 type Capability struct {
@@ -123,23 +119,11 @@ func NewSubqlApi(sys *FilterSystem, backend ethapi.Backend) *SubqlAPI {
 	return api
 }
 
-func (api *SubqlAPI) DataInfo(ctx context.Context) (*DataInfo, error) {
+// This is an alias for `admin_getDesiredConfig`
+func (api *SubqlAPI) DataInfo(ctx context.Context) (*params.ChainDataConfig, error) {
 	config := rawdb.ReadChainDataConfig(api.backend.ChainDb())
 
-	start := 0
-	if config.DesiredChainDataStart != nil {
-		start = int(*config.DesiredChainDataStart)
-	}
-
-	end := 0
-	if config.DesiredChainDataEnd != nil {
-		end = int(*config.DesiredChainDataEnd)
-	}
-
-	return &DataInfo{
-		StartBlock: start,
-		EndBlock: end,
-	}, nil
+	return config, nil
 }
 
 func (api *SubqlAPI) FilterBlocksCapabilities(ctx context.Context) (*Capability, error) {
