@@ -1401,8 +1401,6 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.RequestsHash != nil {
 		result["requestsRoot"] = head.RequestsHash
 	}
-	// Subql additional fields
-	fields["transactionsBloom"] = common.Bytes2Hex(api.b.GetTxBloom(ctx, header.Hash()).Bytes())
 	return result
 }
 
@@ -1441,9 +1439,6 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, config *param
 	if block.Header().RequestsHash != nil {
 		fields["requests"] = block.Requests()
 	}
-
-	// Subql addition
-	fields["transactionsBloom"] = common.Bytes2Hex(api.b.GetTxBloom(ctx, b.Hash()).Bytes())
 	return fields
 }
 
