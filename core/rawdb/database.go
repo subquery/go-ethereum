@@ -219,7 +219,6 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 	//     not frozen anything yet. Ensure that no blocks are missing yet from the
 	//     key-value store, since that would mean we already had an old freezer.
 
-
 	// With a sharded node, if the desired start height is set then the ancients
 	// wont start at the genesis height, so we validate based on the shard start
 	genesisHeight := uint64(0)
@@ -230,10 +229,12 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 	// The freezer might not inclue the tail, so we use the
 	// This doesn't work because the value in the freezer will be empty :(
 	if frozen, err := frdb.Ancients(); err != nil {
-		return nil, err;
+		return nil, err
 	} else if frozen > 0 && frozen < genesisHeight {
 		genesisHeight = frozen
 	}
+
+	log.Info("Subql Creating Freezer", "genesisHeight", genesisHeight)
 
 	// If the genesis hash is empty, we have a new key-value store, so nothing to
 	// validate in this method. If, however, the genesis hash is not nil, compare
@@ -241,10 +242,9 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 	if kvgenesis, _ := db.Get(headerHashKey(genesisHeight)); len(kvgenesis) > 0 {
 		frozen, _ := frdb.Ancients()
 		tail, _ := frdb.Tail()
+		log.Info("Frozen details", "tail", tail, "frozen", frozen)
 		// With sharding we check the number of items not deleted, not the total number
-		if frozen - tail > 0 {
-			tail, _ := frdb.Tail()
-			log.Info("Frozen details", "tail", tail, "frozen", frozen)
+		if frozen-tail > 0 {
 			// If the freezer already contains something, ensure that the genesis blocks
 			// match, otherwise we might mix up freezers across chains and destroy both
 			// the freezer and the key-value store.
