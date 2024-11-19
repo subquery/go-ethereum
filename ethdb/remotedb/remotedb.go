@@ -82,6 +82,10 @@ func (db *Database) AncientSize(kind string) (uint64, error) {
 	panic("not supported")
 }
 
+func (db *Database) AncientItems(kind string) (uint64, error) {
+	panic("not supported")
+}
+
 func (db *Database) ReadAncients(fn func(op ethdb.AncientReaderOp) error) (err error) {
 	return fn(db)
 }

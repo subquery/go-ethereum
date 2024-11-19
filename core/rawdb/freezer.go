@@ -232,6 +232,19 @@ func (f *Freezer) AncientSize(kind string) (uint64, error) {
 	return 0, errUnknownTable
 }
 
+// AncientItems returns the number of items the ancient of the specified category.
+func (f *Freezer) AncientItems(kind string) (uint64, error) {
+	// This needs the write lock to avoid data races on table fields.
+	// Speed doesn't matter here, AncientSize is for debugging.
+	f.writeLock.RLock()
+	defer f.writeLock.RUnlock()
+
+	if table := f.tables[kind]; table != nil {
+		return table.items.Load(), nil
+	}
+	return 0, errUnknownTable
+}
+
 // ReadAncients runs the given read operation while ensuring that no writes take place
 // on the underlying freezer.
 func (f *Freezer) ReadAncients(fn func(ethdb.AncientReaderOp) error) (err error) {
@@ -369,9 +382,13 @@ func (f *Freezer) repair() error {
 		head = uint64(math.MaxUint64)
 		tail = uint64(0)
 	)
-	for _, table := range f.tables {
+	for kind, table := range f.tables {
 		items := table.items.Load()
 		if head > items {
+			// Allow the transactions bloom to be behind, this will be backfilled later on
+			if kind == ChainFreezerTransactionBloomTable {
+				continue
+			}
 			head = items
 		}
 		hidden := table.itemHidden.Load()

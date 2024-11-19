@@ -63,11 +63,26 @@ func (batch *freezerBatch) reset() {
 func (batch *freezerBatch) commit() (item uint64, writeSize int64, err error) {
 	// Check that count agrees on all batches.
 	item = uint64(math.MaxUint64)
+	maxData := uint64(math.MaxUint64)
+
+	// This has been modified for transactions bloom back filling
+	// Check that tables with data have the same count
 	for name, tb := range batch.tables {
-		if item < math.MaxUint64 && tb.curItem != item {
+		if tb.totalBytes > 0 {
+			if maxData == uint64(math.MaxUint64) {
+				maxData = tb.curItem
+			} else if maxData != tb.curItem {
+				return 0, 0, fmt.Errorf("table %s is at item %d, want %d", name, tb.curItem, item)
+			}
+		}
+	}
+	// Find the max value
+	for name, tb := range batch.tables {
+		if item == uint64(math.MaxUint64) || item < tb.curItem {
+			item = tb.curItem
+		} else if item != tb.curItem && tb.totalBytes == 0 {
 			return 0, 0, fmt.Errorf("table %s is at item %d, want %d", name, tb.curItem, item)
 		}
-		item = tb.curItem
 	}
 
 	// Commit all table batches.

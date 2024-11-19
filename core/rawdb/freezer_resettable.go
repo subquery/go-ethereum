@@ -159,6 +159,14 @@ func (f *resettableFreezer) AncientSize(kind string) (uint64, error) {
 	return f.freezer.AncientSize(kind)
 }
 
+// AncientItems returns the number of items the ancient of the specified category.
+func (f *resettableFreezer) AncientItems(kind string) (uint64, error) {
+	f.lock.RLock()
+	defer f.lock.RUnlock()
+
+	return f.freezer.AncientItems(kind)
+}
+
 // ReadAncients runs the given read operation while ensuring that no writes take place
 // on the underlying freezer.
 func (f *resettableFreezer) ReadAncients(fn func(ethdb.AncientReaderOp) error) (err error) {

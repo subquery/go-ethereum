@@ -101,6 +101,9 @@ type AncientReaderOp interface {
 
 	// AncientSize returns the ancient size of the specified category.
 	AncientSize(kind string) (uint64, error)
+
+	// AncientItems returns the number of items the ancient of the specified category.
+	AncientItems(kind string) (uint64, error)
 }
 
 // AncientReader is the extended ancient reader interface including 'batched' or 'atomic' reading.
