@@ -302,6 +302,17 @@ func (f *MemoryFreezer) AncientSize(kind string) (uint64, error) {
 	return 0, errUnknownTable
 }
 
+// AncientItems returns the number of items the ancient of the specified category.
+func (f *MemoryFreezer) AncientItems(kind string) (uint64, error) {
+	f.lock.RLock()
+	defer f.lock.RUnlock()
+
+	if table := f.tables[kind]; table != nil {
+		return table.items, nil
+	}
+	return 0, errUnknownTable
+}
+
 // ReadAncients runs the given read operation while ensuring that no writes take place
 // on the underlying freezer.
 func (f *MemoryFreezer) ReadAncients(fn func(ethdb.AncientReaderOp) error) (err error) {

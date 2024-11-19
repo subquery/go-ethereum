@@ -192,6 +192,7 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 				return
 			}
 		}
+
 		threshold, err := f.freezeThreshold(nfdb)
 		if err != nil {
 			backoff = true
@@ -199,6 +200,50 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 			continue
 		}
 		frozen, _ := f.Ancients() // no error will occur, safe to ignore
+
+		// Back fill transactions bloom untill it catches up then resume normal freezing
+		txbFrozen, err := f.AncientItems(ChainFreezerTransactionBloomTable)
+		if err != nil {
+			log.Error("Failed to check frozen transaction bloom", "err", err)
+			backoff = true
+			continue
+		}
+
+		if txbFrozen < frozen {
+			var (
+				first = txbFrozen
+				last  = threshold
+			)
+			if last-first+1 > freezerBatchLimit {
+				last = freezerBatchLimit + first - 1
+			}
+			// Don't go ahead of the rest of the frozen datas
+			if last > frozen {
+				last = frozen - 1
+			}
+
+			log.Debug("Freezing historical tx bloom", "from", first, "to", last)
+			txAncients, err := f.freezeTxBloomRange(nfdb, first, last)
+			if err != nil {
+				log.Error("Error in tx bloom freeze operation", "err", err)
+				backoff = true
+				continue
+			}
+
+			// Wipe out all data from the active database
+			batch := db.NewBatch()
+			for i := 0; i < len(txAncients); i++ {
+				// Always keep the genesis block in active database
+				if first+uint64(i) != 0 {
+					DeleteTxBloom(batch, txAncients[i], first+uint64(i))
+				}
+			}
+			if err := batch.Write(); err != nil {
+				log.Crit("Failed to delete frozen canonical blocks", "err", err)
+			}
+			batch.Reset()
+			continue
+		}
 
 		// Short circuit if the blocks below threshold are already frozen.
 		if frozen != 0 && frozen-1 >= threshold {
@@ -357,7 +402,7 @@ func (f *chainFreezer) freezeRange(nfdb *nofreezedb, number, limit uint64) (hash
 			// TODO this can throw an error when rewinding to a block
 			txBloom := ReadTxBloomRLP(nfdb, hash, number)
 			if len(txBloom) == 0 && !outOfShard {
-				return fmt.Errorf("total transaction bloom, can't freeze block %d", number)
+				return fmt.Errorf("total transaction bloom missing, can't freeze block %d", number)
 			}
 
 			// Write to the batch.
@@ -376,6 +421,53 @@ func (f *chainFreezer) freezeRange(nfdb *nofreezedb, number, limit uint64) (hash
 			if err := op.AppendRaw(ChainFreezerDifficultyTable, number, td); err != nil {
 				return fmt.Errorf("can't write td to Freezer: %v", err)
 			}
+			if err := op.AppendRaw(ChainFreezerTransactionBloomTable, number, txBloom); err != nil {
+				return fmt.Errorf("can't write transaction bloom to Freezer: %v", err)
+			}
+
+			hashes = append(hashes, hash)
+		}
+		return nil
+	})
+	return hashes, err
+}
+
+// Back fill transactions bloom data
+func (f *chainFreezer) freezeTxBloomRange(nfdb *nofreezedb, number, limit uint64) (hashes []common.Hash, err error) {
+	hashes = make([]common.Hash, 0, limit-number+1)
+
+	dataConfig := ReadChainDataConfig(nfdb)
+
+	_, err = f.ModifyAncients(func(op ethdb.AncientWriteOp) error {
+		for ; number <= limit; number++ {
+
+			// If the data is out of the shard range then we allow writing empty data, this will allow truncating the tail of the freezer later
+			outOfShard := false
+			if dataConfig != nil && dataConfig.DesiredChainDataStart != nil {
+				outOfShard = number < *dataConfig.DesiredChainDataStart
+			}
+
+			// Retrieve all the components of the canonical block.
+			hash := ReadCanonicalHash(nfdb, number)
+			if hash == (common.Hash{}) {
+				// Get the hash from the freezer, its probably already frozen
+				data, err := f.AncientStore.Ancient(ChainFreezerHashTable, number)
+				if err != nil || len(data) == 0 {
+					return fmt.Errorf("canonical hash missing from freezer, can't freeze block %d", number)
+				}
+				hash = common.BytesToHash(data)
+				if hash == (common.Hash{}) && !outOfShard {
+					return fmt.Errorf("canonical hash missing, can't freeze block %d", number)
+				}
+			}
+			// TODO this can throw an error when rewinding to a block
+			// This can happen when the tx bloom indexer has not yet indexed the block, it will abort the current batch but eventually complete
+			txBloom := ReadTxBloomRLP(nfdb, hash, number)
+			if len(txBloom) == 0 && !outOfShard {
+				return fmt.Errorf("total transaction bloom missing, can't freeze block %d", number)
+			}
+
+			// Write to the batch.
 			if err := op.AppendRaw(ChainFreezerTransactionBloomTable, number, txBloom); err != nil {
 				return fmt.Errorf("can't write transaction bloom to Freezer: %v", err)
 			}
